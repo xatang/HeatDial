@@ -1,6 +1,6 @@
 # HeatDial
 
-HeatDial recommends when to adjust a manually operated boiler. It reads temperatures and the recorded dial position, then suggests holding, raising or lowering the dial. It runs independently of HeatCast and requires no boiler connection.
+HeatDial recommends when to adjust a manually operated boiler. It reads temperatures and the recorded dial position, then suggests holding, raising or lowering the dial.
 
 ## Installation
 
@@ -29,8 +29,6 @@ Add these entities to an existing dashboard:
 - `sensor.heatdial_reason` exposes the translated reason for the current advice.
 
 To send phone notifications, use the **Event received** trigger for `event.heatdial_adjustment` and add your mobile app notification action. The event attributes include `event_type`, `from_dial`, `to_dial`, `reason` and, when relevant, `room`. HeatDial publishes this event only after the recommendation persists for 20 minutes, within the configured notification hours. It allows at least three hours between events and eight hours before repeating the same unacknowledged suggestion. Disable Shadow mode to enable event delivery.
-
-When migrating from HeatCast, start with HeatDial in Shadow mode and compare both displays. Once you're ready to cut over, connect the HeatDial event to your notification action and switch off the old HeatCast recommendation notifications.
 
 ## Development
 
