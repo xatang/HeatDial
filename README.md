@@ -4,7 +4,7 @@ HeatDial recommends when to adjust a manually operated boiler. It reads temperat
 
 ## Installation
 
-Once the repository is on GitHub, add its URL in HACS under **Custom repositories → Integration**, download HeatDial, and restart Home Assistant. In **Settings → Devices & services**, add **HeatDial**. Requires Home Assistant 2026.11 or later.
+In Home Assistant, go to **Settings → Marketplace → Add from link**, enter `xatang/HeatDial`, and install the integration. Restart Home Assistant if prompted, then add **HeatDial** under **Settings → Devices & services**. Requires Home Assistant 2026.11 or later.
 
 ## Setup
 
@@ -14,7 +14,7 @@ Once the repository is on GitHub, add its URL in HACS under **Custom repositorie
 - Set the day and night comfort limits, reduction hours, and evening check hours. Start with only measured dial positions. HeatDial recommends one physical step at a time.
 - Leave **Shadow mode** enabled while comparing the advice with observed temperatures. The default is on.
 
-For the original setup, use the kitchen and grandmother's room as primary, the parents' room as secondary, day range **23–25 °C**, night minimum **21.5 °C**, reductions **09:00–19:00**, evening check **20:00–22:00**, and maximum dial **3**. Use comparable room sensor placement. Set the HA weather entity to the source with hourly Met.no data if available.
+Place room thermometers at comparable heights, away from radiators, direct sunlight, and drafts. Choose comfort limits and operating hours that suit your household.
 
 ## What a recommendation means
 
