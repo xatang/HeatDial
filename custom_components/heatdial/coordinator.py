@@ -2,7 +2,8 @@
 
 import asyncio
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import partial
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -17,8 +18,9 @@ from .const import (
     DOMAIN, FORECAST_INTERVAL, FORECAST_MAX_AGE, SENSOR_MAX_AGE, UPDATE_INTERVAL,
 )
 from .engine import (
-    HOUR, MINUTE, HISTORY_SECONDS, Advice, Point, Reading, Settings, Weather,
-    confirm_advice, continuous, decide, dial_position, forecast_horizon, number, weather_signal,
+    HOUR, MINUTE, HISTORY_SECONDS, MAX_GAP, Advice, Point, Reading, Settings, Weather,
+    confirm_advice, continuous, decide, dial_position, forecast_horizon, number,
+    recorded_readings, weather_signal,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,13 +77,63 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
 
     async def _async_setup(self) -> None:
         data = await self._store.async_load() or {}
-        if data.get("sources") != self._sources():
+        if data.get("sources") == self._sources():
+            self._history = [Reading(**item) for item in data.get("history", [])]
+            self._last_dial = data.get("last_dial")
+            self._last_dial_change = data.get("last_dial_change")
+            self._notified = data.get("notified", {})
+            self._last_notice = data.get("last_notice")
+        await self._async_seed_history()
+
+    async def _async_seed_history(self) -> None:
+        """Fill the initial trend window from the existing HA recorder."""
+        if "recorder" not in self.hass.config.components:
             return
-        self._history = [Reading(**item) for item in data.get("history", [])]
-        self._last_dial = data.get("last_dial")
-        self._last_dial_change = data.get("last_dial_change")
-        self._notified = data.get("notified", {})
-        self._last_notice = data.get("last_notice")
+        from homeassistant.components.recorder import get_instance, history
+
+        now = dt_util.utcnow()
+        start = now - timedelta(seconds=HISTORY_SECONDS) - SENSOR_MAX_AGE
+        dial_id = self.config[CONF_DIAL]
+        outdoor_id = self.config[CONF_OUTDOOR]
+        room_ids = (*self.primary, *self.secondary)
+        archive = partial(
+            history.get_significant_states, self.hass, start, now,
+            [dial_id, outdoor_id, *room_ids], significant_changes_only=False,
+        )
+        try:
+            async with asyncio.timeout(10):
+                states = await get_instance(self.hass).async_add_executor_job(archive)
+        except Exception as err:
+            _LOGGER.debug("Recorder history unavailable during HeatDial setup: %s", err)
+            return
+
+        series = {}
+        for key, rows in states.items():
+            series[key] = []
+            for state in rows:
+                timestamp = state.last_updated.timestamp()
+                if key == dial_id:
+                    value = number(state.state)
+                elif timestamp <= start.timestamp():
+                    continue  # Recorder's start boundary is not a fresh temperature report.
+                else:
+                    value = celsius(state.state, state.attributes.get("unit_of_measurement"))
+                series[key].append((timestamp, value))
+        seeded, archived_dial = recorded_readings(
+            now.timestamp(), int(UPDATE_INTERVAL.total_seconds()), SENSOR_MAX_AGE.total_seconds(),
+            dial_id, outdoor_id, room_ids, series, self.settings.max_dial,
+        )
+        saved = continuous(self._history)
+        if not saved or now.timestamp() - saved[-1].time > MAX_GAP:
+            saved = []
+        cutoff = saved[0].time if saved else now.timestamp()
+        self._history = [
+            item for item in seeded if item.time < cutoff and all(key in item.rooms for key in self.primary)
+        ] + saved
+        if archived_dial is not None and (
+            self._last_dial_change is None or archived_dial[1] > self._last_dial_change
+        ):
+            self._last_dial, self._last_dial_change = archived_dial
 
     def _sources(self) -> list:
         return [self.config[CONF_DIAL], self.config[CONF_OUTDOOR], list(self.primary), list(self.secondary)]

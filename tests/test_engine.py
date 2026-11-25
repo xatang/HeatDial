@@ -91,6 +91,34 @@ class HeatDialTests(unittest.TestCase):
     def test_gap_does_not_count_toward_persistence(self):
         self.assertEqual(self.check(kitchen=21.8, history_gap=True).reason, "collecting")
 
+    def test_existing_recorder_history_can_skip_initial_wait(self):
+        now = datetime(2026, 11, 24, 15, 0, tzinfo=LOCAL)
+        end = now.timestamp()
+        series = {
+            "dial": [(end - 5 * 3600, 2)],
+            "out": [(end - 1800, 3)],
+            "a": [(end - 1800, 24.2)],
+            "b": [(end - 1800, 24.5)],
+        }
+        history, dial = engine.recorded_readings(end, 300, 5400, "dial", "out", ("a", "b"), series, 3)
+        self.assertEqual(dial, (2, end - 5 * 3600))
+        current = engine.Reading(end, 2, 3, {"a": 24.2, "b": 24.5})
+        result = engine.decide(engine.Settings(), now, [*history, current], ["a", "b"], [],
+                               engine.Weather(3), dial[1])
+        self.assertEqual(result.reason, "within_range")
+
+    def test_absent_or_stale_recorder_readings_do_not_count_as_room_history(self):
+        now = datetime(2026, 11, 24, 15, 0, tzinfo=LOCAL)
+        end = now.timestamp()
+        series = {"a": [(end - 6000, 22.8)], "b": [(end - 1200, 24.5)]}
+        history, dial = engine.recorded_readings(end, 300, 5400, "dial", "out", ("a", "b"), series, 3)
+        self.assertIsNone(dial)
+        self.assertNotIn("a", history[-1].rooms)
+        current = engine.Reading(end, 2, None, {"a": 22.8, "b": 24.5})
+        result = engine.decide(engine.Settings(), now, [*history, current], ["a", "b"], [],
+                               engine.Weather(), None)
+        self.assertEqual(result.reason, "collecting")
+
     def test_limited_scale(self):
         advice = self.check(kitchen=22.1, settings=engine.Settings(max_dial=2))
         self.assertEqual((advice.reason, advice.recommended), ("dial_limit", 2))

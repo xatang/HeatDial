@@ -1,5 +1,7 @@
 # HeatDial
 
+[Русский](README.ru.md)
+
 HeatDial recommends when to adjust a manually operated boiler. It reads temperatures and the recorded dial position, then suggests holding, raising or lowering the dial.
 
 ## Installation
@@ -20,9 +22,17 @@ Place room thermometers at comparable heights, away from radiators, direct sunli
 
 HeatDial watches for persistent room cooling and warming. A step has to remain indicated for 20 minutes before it appears as an adjustment. A sharp isolated room drop pauses advice to allow for ventilation. After a recorded dial change HeatDial waits three hours for the rooms to respond. During the evening check, outdoor cooling and sustained forecast conditions can trigger a recommendation ahead of overnight room cooling. HeatDial anchors near-term forecast temperatures to the outdoor thermometer and uses multiple hourly values to discount isolated spikes. Its overnight advice indicates risk and does not estimate the precise room temperature at dawn.
 
-If an important room sensor goes stale, HeatDial waits for fresh data. Missing forecast data still allows assessment from local readings. Reduction also needs fresh outdoor data. Pending conditions use continuous samples and start over after a data gap.
+HeatDial reads up to five hours of existing Recorder history at setup, including for newly selected sensors. When less than 30 minutes of usable primary room readings are available, it collects the missing history first. If an important room sensor goes stale, HeatDial waits for fresh data. Missing forecast data still allows assessment from local readings. Reduction also needs fresh outdoor data. Pending conditions use continuous samples and start over after a data gap.
 
-Add these entities to an existing dashboard:
+## HeatDial page
+
+Open **Settings → Devices & services → Integrations → HeatDial → Open HeatDial**. The page ships with the integration and uses your Home Assistant profile language (English or Russian).
+
+- **Overview** shows the recorded dial position, the advice, the room temperatures and the weather outlook used in the decision.
+- **History** charts room temperatures and dial positions for the last 24 hours or three days.
+- **Settings** changes the comfort range, schedule and shadow mode. Use the integration's options to change the sensor assignments.
+
+You can also add these entities to an existing dashboard:
 
 - `sensor.heatdial_recommendation` holds the action and evidence. Room and outdoor values in its attributes are in Celsius.
 - `sensor.heatdial_recommended_dial` displays the position to keep or move to.

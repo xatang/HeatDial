@@ -119,6 +119,40 @@ def continuous(history: Sequence[Reading]) -> list[Reading]:
     return list(history)
 
 
+def recorded_readings(
+    end: float, step: int, max_age: float, dial_id: str, outdoor_id: str,
+    room_ids: Sequence[str], series: dict[str, list[tuple[float, float | None]]],
+    maximum: int,
+) -> tuple[list[Reading], tuple[int, float] | None]:
+    """Carry recorded states forward onto the controller's sample grid."""
+    samples = []
+    positions = dict.fromkeys(series, 0)
+    states: dict[str, tuple[float, float | None]] = {}
+    for offset in range(HISTORY_SECONDS, 0, -step):
+        timestamp = end - offset
+        for key, points in series.items():
+            position = positions[key]
+            while position < len(points) and points[position][0] <= timestamp:
+                states[key] = points[position]
+                position += 1
+            positions[key] = position
+
+        def recent(key: str) -> float | None:
+            point = states.get(key)
+            return point[1] if point is not None and timestamp - point[0] <= max_age else None
+
+        room_values = {key: value for key in room_ids if (value := recent(key)) is not None}
+        dial = dial_position(states.get(dial_id, (0, None))[1], maximum)
+        samples.append(Reading(timestamp, dial, recent(outdoor_id), room_values))
+
+    last_dial = None
+    for timestamp, raw in series.get(dial_id, []):
+        dial = dial_position(raw, maximum)
+        if dial is not None and (last_dial is None or dial != last_dial[0]):
+            last_dial = (dial, timestamp)
+    return samples, last_dial
+
+
 def _reference(
     history: Sequence[Reading], age: int, sample_value: Callable[[Reading], float | None]
 ) -> float | None:
@@ -231,7 +265,7 @@ def decide(
 
     if last_dial_change is not None and current.time - last_dial_change < SETTLE_SECONDS:
         return advice("hold", "settling")
-    if current.time - history[0].time < 30 * MINUTE:
+    if not _held(history, 30 * MINUTE, lambda item: all(key in item.rooms for key in primary_ids)):
         return Advice("wait", "collecting", dial, None)
 
     primary = [room_signal(history, key) for key in primary_ids]
