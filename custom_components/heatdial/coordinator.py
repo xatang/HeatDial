@@ -65,6 +65,7 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
         self.shadow = self.config.get(CONF_SHADOW, True)
         self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._history: list[Reading] = []
+        self._history_seeded = False
         self._last_dial: int | None = None
         self._last_dial_change: float | None = None
         self._notified: dict[str, float] = {}
@@ -83,7 +84,6 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             self._last_dial_change = data.get("last_dial_change")
             self._notified = data.get("notified", {})
             self._last_notice = data.get("last_notice")
-        await self._async_seed_history()
 
     async def _async_seed_history(self) -> None:
         """Fill the initial trend window from the existing HA recorder."""
@@ -123,7 +123,9 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             now.timestamp(), int(UPDATE_INTERVAL.total_seconds()), SENSOR_MAX_AGE.total_seconds(),
             dial_id, outdoor_id, room_ids, series, self.settings.max_dial,
         )
-        saved = continuous(self._history)
+        saved = continuous([
+            item for item in self._history if all(key in item.rooms for key in self.primary)
+        ])
         if not saved or now.timestamp() - saved[-1].time > MAX_GAP:
             saved = []
         cutoff = saved[0].time if saved else now.timestamp()
@@ -211,6 +213,12 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
 
     async def _async_read(self) -> Snapshot:
         utc = dt_util.utcnow()
+        rooms = {key: self._temperature(key, utc) for key in (*self.primary, *self.secondary)}
+        has_primary = all(rooms[key] is not None for key in self.primary)
+        if has_primary and not self._history_seeded:
+            self._history_seeded = True
+            await self._async_seed_history()
+            utc = dt_util.utcnow()
         now = dt_util.as_local(utc)
         timestamp = now.timestamp()
         dial_state = self.hass.states.get(self.config[CONF_DIAL])
@@ -225,17 +233,20 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             self._last_dial = dial
             self._last_dial_change = observed_change
 
-        rooms = {key: self._temperature(key, utc) for key in (*self.primary, *self.secondary)}
         outdoor = self._temperature(self.config[CONF_OUTDOOR], utc)
         current = Reading(timestamp, dial, outdoor, {key: val for key, val in rooms.items() if val is not None})
         self._history = [
             item for item in self._history if timestamp - HISTORY_SECONDS <= item.time < timestamp
         ]
-        if self._history and timestamp - self._history[-1].time < MINUTE:
-            self._history[-1] = current
+        if has_primary:
+            if self._history and timestamp - self._history[-1].time < MINUTE:
+                self._history[-1] = current
+            else:
+                self._history.append(current)
+            history = continuous(self._history)
         else:
-            self._history.append(current)
-        history = continuous(self._history)
+            history = continuous([*self._history, current])
+            self._pending = None
         if len(history) == 1:
             self._pending = None
         forecast, provider_now = await self._async_forecast(utc)
