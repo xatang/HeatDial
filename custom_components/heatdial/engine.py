@@ -11,8 +11,47 @@ MINUTE = 60
 HOUR = 60 * MINUTE
 MAX_GAP = 12 * MINUTE
 HISTORY_SECONDS = 5 * HOUR
-SETTLE_SECONDS = 3 * HOUR
-CONFIRM_SECONDS = 20 * MINUTE
+
+
+@dataclass(frozen=True)
+class Tuning:
+    cold_minutes: int = 60
+    deep_cold_minutes: int = 30
+    deep_cold_degrees: float = 0.7
+    secondary_margin_degrees: float = 0.4
+    airing_drop_degrees: float = 0.7
+    airing_peer_degrees: float = 0.45
+    airing_minutes: int = 45
+    forecast_hours: int = 6
+    forecast_bias_hours: float = 8.0
+    forecast_low_hours: int = 3
+    outdoor_cooling_degrees: float = 2.0
+    strong_cooling_degrees: float = 6.0
+    evening_room_drop_degrees: float = 0.12
+    rebound_degrees: float = 0.5
+    confirmation_minutes: int = 20
+    settling_minutes: int = 180
+
+
+# Ranges and increments are shared by the native config flow and the panel.
+TUNING_LIMITS = {
+    "cold_minutes": (15, 70, 5),
+    "deep_cold_minutes": (5, 60, 5),
+    "deep_cold_degrees": (0.1, 4, 0.1),
+    "secondary_margin_degrees": (0, 2, 0.1),
+    "airing_drop_degrees": (0.1, 5, 0.05),
+    "airing_peer_degrees": (0.05, 5, 0.05),
+    "airing_minutes": (0, 180, 5),
+    "forecast_hours": (2, 24, 1),
+    "forecast_bias_hours": (0, 24, 0.5),
+    "forecast_low_hours": (1, 12, 1),
+    "outdoor_cooling_degrees": (0.1, 12, 0.1),
+    "strong_cooling_degrees": (0.1, 30, 0.1),
+    "evening_room_drop_degrees": (0.02, 3, 0.02),
+    "rebound_degrees": (0, 10, 0.1),
+    "confirmation_minutes": (0, 180, 5),
+    "settling_minutes": (0, 720, 5),
+}
 
 
 @dataclass(frozen=True)
@@ -56,11 +95,10 @@ class Weather:
             return None
         return self.outdoor - self.low
 
-    @property
-    def rebounds(self) -> bool:
+    def rebounds(self, threshold: float) -> bool:
         return (
             self.end is not None and self.outdoor is not None
-            and self.end >= self.outdoor + 0.5
+            and self.end >= self.outdoor + threshold
         )
 
 
@@ -83,14 +121,14 @@ class Advice:
 
 
 def confirm_advice(
-    advice: Advice, pending: tuple[int, float] | None, timestamp: float
+    advice: Advice, pending: tuple[int, float] | None, timestamp: float, tuning: Tuning = Tuning()
 ) -> tuple[Advice, tuple[int, float] | None]:
     """Show a dial change only after a continuously matching recommendation."""
     if advice.action not in {"raise", "lower"} or advice.recommended is None:
         return advice, None
     if pending is None or pending[0] != advice.recommended:
         pending = (advice.recommended, timestamp)
-    if timestamp - pending[1] >= CONFIRM_SECONDS:
+    if timestamp - pending[1] >= tuning.confirmation_minutes * MINUTE:
         return advice, pending
     return replace(advice, action="hold", reason="confirming", recommended=advice.dial), pending
 
@@ -102,6 +140,31 @@ def number(value: object) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return parsed if isfinite(parsed) else None
+
+
+def read_tuning(config: Mapping[str, object]) -> Tuning:
+    """Validate supplied values and use defaults for existing config entries."""
+    defaults = Tuning()
+    values = {}
+    for key, (minimum, maximum, _) in TUNING_LIMITS.items():
+        default = getattr(defaults, key)
+        value = number(config.get(key, default))
+        if value is None or not minimum <= value <= maximum:
+            raise ValueError(f"Invalid tuning value: {key}")
+        if isinstance(default, int):
+            if not value.is_integer():
+                raise ValueError(f"Expected an integer for {key}")
+            value = int(value)
+        values[key] = value
+    tuning = Tuning(**values)
+    if (
+        tuning.deep_cold_minutes > tuning.cold_minutes
+        or tuning.airing_peer_degrees > tuning.airing_drop_degrees
+        or tuning.forecast_low_hours > tuning.forecast_hours
+        or tuning.strong_cooling_degrees < tuning.outdoor_cooling_degrees
+    ):
+        raise ValueError("Conflicting tuning values")
+    return tuning
 
 
 def dial_position(value: object, maximum: int) -> int | None:
@@ -231,31 +294,34 @@ def _held(
     return False
 
 
-def room_signal(history: Sequence[Reading], entity_id: str) -> Room:
+def room_signal(history: Sequence[Reading], entity_id: str, tuning: Tuning = Tuning()) -> Room:
     """Use a two-hour trend and flag sharp isolated cooling for 45 minutes."""
     current = history[-1]
     value = current.rooms[entity_id]
     reference = _reference(history, 2 * HOUR, lambda item: item.rooms.get(entity_id))
-    recent = [item for item in history if current.time - item.time <= 55 * MINUTE]
+    if tuning.airing_minutes == 0:
+        return Room(entity_id, value, None if reference is None else value - reference, False)
+    airing_age = tuning.airing_minutes * MINUTE
+    recent = [item for item in history if current.time - item.time <= airing_age + 10 * MINUTE]
     for left, right in zip(recent, recent[1:]):
-        if current.time - right.time > 45 * MINUTE:
+        if current.time - right.time > airing_age:
             continue
         before, after = left.rooms.get(entity_id), right.rooms.get(entity_id)
-        if before is None or after is None or before - after < 0.7:
+        if before is None or after is None or before - after < tuning.airing_drop_degrees:
             continue
         peer_drops = [
             temp - right.rooms[key] for key, temp in left.rooms.items()
             if key != entity_id and key in right.rooms
         ]
-        if not peer_drops or max(peer_drops) < 0.45:
+        if not peer_drops or max(peer_drops) < tuning.airing_peer_degrees:
             return Room(entity_id, value, None if reference is None else value - reference, True)
     return Room(entity_id, value, None if reference is None else value - reference, False)
 
 
-def forecast_horizon(now: datetime, settings: Settings) -> float:
+def forecast_horizon(now: datetime, settings: Settings, tuning: Tuning = Tuning()) -> float:
     """Pick the morning deadline in the evening and a six-hour horizon by day."""
     if settings.day_start <= now.hour < settings.evening_from:
-        return now.timestamp() + 6 * HOUR
+        return now.timestamp() + tuning.forecast_hours * HOUR
     morning = now.replace(hour=settings.day_start, minute=0, second=0, microsecond=0)
     if now.hour >= settings.day_start:
         morning += timedelta(days=1)
@@ -264,7 +330,7 @@ def forecast_horizon(now: datetime, settings: Settings) -> float:
 
 def weather_signal(
     history: Sequence[Reading], forecast: Sequence[Point], provider_now: float | None,
-    horizon: float,
+    horizon: float, tuning: Tuning = Tuning(),
 ) -> Weather:
     """Correct forecast bias near the present and smooth single-hour lows."""
     current = history[-1]
@@ -282,13 +348,15 @@ def weather_signal(
         if adjusted and point.time - adjusted[-1].time > 90 * MINUTE:
             break
         age = point.time - current.time
-        correction = offset * max(0, 1 - age / (8 * HOUR))
+        bias_span = tuning.forecast_bias_hours * HOUR
+        correction = offset * max(0, 1 - age / bias_span) if bias_span else 0
         adjusted.append(Point(point.time, point.temperature + correction))
-    if len(adjusted) < 3:
+    window = tuning.forecast_low_hours
+    if len(adjusted) < window:
         return Weather(outdoor, change)
     low = min(
-        sum(point.temperature for point in adjusted[i:i+3]) / 3
-        for i in range(len(adjusted) - 2)
+        sum(point.temperature for point in adjusted[i:i + window]) / window
+        for i in range(len(adjusted) - window + 1)
     )
     end = adjusted[-1].temperature if horizon - adjusted[-1].time <= 90 * MINUTE else None
     return Weather(outdoor, change, low, end)
@@ -303,6 +371,7 @@ def decide(
     weather: Weather,
     last_dial_change: float | None,
     weights: Mapping[str, float] | None = None,
+    tuning: Tuning = Tuning(),
 ) -> Advice:
     """Recommend holding or a single physical step, with a stable reason code."""
     current = history[-1]
@@ -319,13 +388,13 @@ def decide(
             return Advice("hold", "dial_limit", dial, dial, room)
         return Advice(action, reason, dial, recommendation, room)
 
-    if last_dial_change is not None and current.time - last_dial_change < SETTLE_SECONDS:
+    if last_dial_change is not None and current.time - last_dial_change < tuning.settling_minutes * MINUTE:
         return advice("hold", "settling")
     if not _held(history, 30 * MINUTE, lambda item: all(key in item.rooms for key in primary_ids)):
         return Advice("wait", "collecting", dial, None)
 
-    primary = [room_signal(history, key) for key in primary_ids]
-    secondary = [room_signal(history, key) for key in secondary_ids if key in current.rooms]
+    primary = [room_signal(history, key, tuning) for key in primary_ids]
+    secondary = [room_signal(history, key, tuning) for key in secondary_ids if key in current.rooms]
     if any(room.airing for room in primary):
         return advice("hold", "airing")
     all_rooms = [*primary, *secondary]
@@ -343,8 +412,10 @@ def decide(
 
     def priority_cold(room: Room) -> bool:
         factor = max(0.25, weights[room.entity_id])
-        return sustained_cold(room, lower - 0.7, int(30 * MINUTE / factor)) or (
-            sustained_cold(room, lower, int(HOUR / factor))
+        return sustained_cold(
+            room, lower - tuning.deep_cold_degrees, int(tuning.deep_cold_minutes * MINUTE / factor)
+        ) or (
+            sustained_cold(room, lower, int(tuning.cold_minutes * MINUTE / factor))
             and (room.delta is None or room.delta < 0.1)
         )
 
@@ -358,24 +429,25 @@ def decide(
         for room in sorted(secondary, key=lambda item: -weights[item.entity_id]):
             weight = weights[room.entity_id]
             if not room.airing and sustained_cold(
-                room, lower - 0.8 * (1 - weight), int(HOUR / max(0.25, weight))
+                room, lower - 2 * tuning.secondary_margin_degrees * (1 - weight),
+                int(tuning.cold_minutes * MINUTE / max(0.25, weight)),
             ) and (
                 room.delta is None or room.delta < 0.1
             ):
                 return advice("raise", "secondary_cold", room)
 
-    observed_cooling = weather.recent_change is not None and weather.recent_change <= -2.0
-    forecast_cooling = weather.drop is not None and weather.drop >= 2.0
+    observed_cooling = weather.recent_change is not None and weather.recent_change <= -tuning.outdoor_cooling_degrees
+    forecast_cooling = weather.drop is not None and weather.drop >= tuning.outdoor_cooling_degrees
     if settings.evening_from <= now.hour < settings.evening_until and warmest.temperature < upper:
         reference = _reference(history, 4 * HOUR, lambda item: item.rooms.get(coldest.entity_id))
         evening_delta = None if reference is None else coldest.temperature - reference
         room_cooling = (
             coldest.temperature <= settings.day_min + 1.0
-            and evening_delta is not None and evening_delta <= -0.12
+            and evening_delta is not None and evening_delta <= -tuning.evening_room_drop_degrees
         )
-        severe_forecast = weather.drop is not None and weather.drop >= 6.0
+        severe_forecast = weather.drop is not None and weather.drop >= tuning.strong_cooling_degrees
         if severe_forecast or (
-            room_cooling and (observed_cooling or forecast_cooling) and not weather.rebounds
+            room_cooling and (observed_cooling or forecast_cooling) and not weather.rebounds(tuning.rebound_degrees)
         ):
             return advice(
                 "raise", "overnight_cold", replace(coldest, delta=evening_delta, trend_hours=4)

@@ -20,7 +20,7 @@ from .const import (
 from .engine import (
     HOUR, MINUTE, HISTORY_SECONDS, MAX_GAP, Advice, Point, Reading, Settings, Weather,
     confirm_advice, continuous, decide, dial_position, forecast_horizon, number,
-    recorded_readings, resolve_scale, room_groups, room_weights, weather_signal,
+    read_tuning, recorded_readings, resolve_scale, room_groups, room_weights, weather_signal,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,6 +57,7 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=UPDATE_INTERVAL
         )
         self.config = {**entry.data, **entry.options}
+        self.tuning = read_tuning(self.config)
         helper = hass.states.get(self.config[CONF_DIAL])
         self.scale = resolve_scale(
             self.config.get(CONF_DIAL_SCALE, ""), helper.attributes.get("max") if helper else None
@@ -260,12 +261,13 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
         if len(history) == 1:
             self._pending = None
         forecast, provider_now = await self._async_forecast(utc)
-        weather = weather_signal(history, forecast, provider_now, forecast_horizon(now, self.settings))
+        horizon = forecast_horizon(now, self.settings, self.tuning)
+        weather = weather_signal(history, forecast, provider_now, horizon, self.tuning)
         advice = decide(
             self.settings, now, history, self.primary, self.secondary, weather,
-            self._last_dial_change, self.weights,
+            self._last_dial_change, self.weights, self.tuning,
         )
-        advice, self._pending = confirm_advice(advice, self._pending, timestamp)
+        advice, self._pending = confirm_advice(advice, self._pending, timestamp, self.tuning)
         notice = self._notice(advice, now)
         self._store.async_delay_save(self._stored_data, 10)
         return Snapshot(advice, weather, rooms, self.shadow, notice)

@@ -11,6 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 
 from .const import CONF_DIAL, CONF_OUTDOOR, CONF_WEATHER, DOMAIN
+from .engine import TUNING_LIMITS
 
 if TYPE_CHECKING:
     from . import HeatDialEntry
@@ -37,6 +38,8 @@ async def async_register_heatdial_panel(hass: HomeAssistant, entry: "HeatDialEnt
     config = {
         "entry_id": entry.entry_id,
         "settings": asdict(coordinator.settings),
+        "tuning": asdict(coordinator.tuning),
+        "tuning_limits": TUNING_LIMITS,
         "dial_scale": list(coordinator.scale),
         "shadow_mode": coordinator.shadow,
         "dial": coordinator.config[CONF_DIAL],

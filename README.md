@@ -20,7 +20,7 @@ Place room thermometers at comparable heights, away from radiators, direct sunli
 
 ## What a recommendation means
 
-HeatDial watches for persistent room cooling and warming. A step has to remain indicated for 20 minutes before it appears as an adjustment. A sharp isolated room drop pauses advice to allow for ventilation. After a recorded dial change HeatDial waits three hours for the rooms to respond. During the evening check, outdoor cooling and sustained forecast conditions can trigger a recommendation ahead of overnight room cooling. HeatDial anchors near-term forecast temperatures to the outdoor thermometer and uses multiple hourly values to discount isolated spikes. Its overnight advice indicates risk and does not estimate the precise room temperature at dawn.
+HeatDial watches for persistent room cooling and warming. By default a step must remain indicated for 20 minutes, and after a recorded dial change HeatDial waits three hours for the rooms to respond. A sharp isolated room drop pauses advice to allow for ventilation. During the evening check, outdoor cooling and sustained forecast conditions can trigger a recommendation ahead of overnight room cooling. HeatDial anchors near-term forecast temperatures to the outdoor thermometer and uses multiple hourly values to discount isolated spikes.
 
 HeatDial reads up to five hours of existing Recorder history at setup, including for newly selected sensors. When less than 30 minutes of usable primary room readings are available, it collects the missing history first. If an important room sensor goes stale, HeatDial waits for fresh data. Missing forecast data still allows assessment from local readings. Reduction also needs fresh outdoor data. Pending conditions use continuous samples and start over after a data gap.
 
@@ -30,7 +30,7 @@ Open **HeatDial** from the Home Assistant sidebar or from **Settings → Devices
 
 - **Overview** shows the recorded dial position, the advice, the room temperatures and the weather outlook used in the decision.
 - **History** shows room and outdoor temperatures, dial positions and advice changes for 24 hours, three days or seven days.
-- **Settings** changes the comfort range, schedule, data sources, dial scale and shadow mode.
+- **Settings** changes the comfort range, schedule, data sources, dial scale and shadow mode. **Advanced settings** exposes room cooling thresholds, airing detection, forecast rules and dial timing.
 
 You can also add these entities to an existing dashboard:
 
@@ -38,7 +38,7 @@ You can also add these entities to an existing dashboard:
 - `sensor.heatdial_recommended_dial` displays the position to keep or move to.
 - `sensor.heatdial_reason` exposes the translated reason for the current advice.
 
-To send phone notifications, use the **Event received** trigger for `event.heatdial_adjustment` and add your mobile app notification action. The event attributes include `event_type`, `from_dial`, `to_dial`, `reason` and, when relevant, `room`. HeatDial publishes this event only after the recommendation persists for 20 minutes, within the configured notification hours. It allows at least three hours between events and eight hours before repeating the same unacknowledged suggestion. Disable Shadow mode to enable event delivery.
+To send phone notifications, use the **Event received** trigger for `event.heatdial_adjustment` and add your mobile app notification action. The event attributes include `event_type`, `from_dial`, `to_dial`, `reason` and, when relevant, `room`. HeatDial publishes the event only after the configured confirmation delay, within the configured notification hours. It allows at least three hours between events and eight hours before repeating the same unacknowledged suggestion. Disable Shadow mode to enable event delivery.
 
 ## Development
 

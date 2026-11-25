@@ -57,6 +57,28 @@ class HeatDialTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             engine.room_weights('{"a": 0}', ["a"], [])
 
+    def test_tuning_uses_legacy_defaults_and_validates_related_thresholds(self):
+        self.assertEqual(engine.read_tuning({}), engine.Tuning())
+        self.assertEqual(engine.read_tuning({"settling_minutes": 90}).settling_minutes, 90)
+        for invalid in ({"forecast_hours": 2}, {"cold_minutes": 15}, {"confirmation_minutes": 2.5},
+                        {"strong_cooling_degrees": 1}, {"airing_drop_degrees": 0.2}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                engine.read_tuning(invalid)
+
+    def test_custom_confirmation_and_weather_rules_are_applied(self):
+        advice = engine.Advice("raise", "room_cold", 2, 3)
+        immediate, _ = engine.confirm_advice(
+            advice, None, 0, engine.Tuning(confirmation_minutes=0)
+        )
+        self.assertEqual(immediate, advice)
+        now = datetime(2026, 11, 24, 15, 0, tzinfo=LOCAL)
+        tuning = engine.Tuning(forecast_hours=4, forecast_bias_hours=0, forecast_low_hours=1)
+        horizon = engine.forecast_horizon(now, engine.Settings(), tuning)
+        self.assertEqual(horizon - now.timestamp(), 4 * 3600)
+        history = [engine.Reading(now.timestamp(), 2, 2, {})]
+        forecast = [engine.Point(now.timestamp() + 3600, 5)]
+        self.assertEqual(engine.weather_signal(history, forecast, 8, horizon, tuning).low, 5)
+
     def test_higher_weight_responds_to_cooling_sooner(self):
         now = datetime(2026, 11, 24, 15, 0, tzinfo=LOCAL)
         end = now.timestamp()

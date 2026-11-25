@@ -11,6 +11,13 @@ const SCHEDULE_FIELDS = ["day_start", "day_end", "lower_from", "lower_until", "e
 const FIELDS = [
   ...COMFORT_FIELDS, ...SCHEDULE_FIELDS,
 ];
+const TUNING_GROUPS = {
+  tuningRoom: ["cold_minutes", "deep_cold_minutes", "deep_cold_degrees", "secondary_margin_degrees"],
+  tuningAiring: ["airing_drop_degrees", "airing_peer_degrees", "airing_minutes"],
+  tuningWeather: ["forecast_hours", "forecast_bias_hours", "forecast_low_hours", "outdoor_cooling_degrees",
+    "strong_cooling_degrees", "evening_room_drop_degrees", "rebound_degrees"],
+  tuningTiming: ["confirmation_minutes", "settling_minutes"],
+};
 const CHART_COLORS = ["--primary-color", "--warning-color", "--success-color", "--info-color",
   "--accent-color"];
 
@@ -447,6 +454,7 @@ class HeatDialPanel extends HTMLElement {
         </div>
       </section>
       </div>
+      ${this.#advancedSettings(config)}
       <div class="save-row"><button type="submit">${t.save}</button><span role="status"></span></div>
     </form>`;
     const form = page.querySelector("form");
@@ -479,6 +487,27 @@ class HeatDialPanel extends HTMLElement {
     form.addEventListener("submit", (event) => this.#save(event));
     form.querySelector('[name="dial"]').addEventListener("change", () => this.#updateDialPreview());
     this.#updateDialPreview();
+  }
+
+  #advancedSettings(config) {
+    if (!config.tuning_limits) return "";
+    const t = this.#t;
+    return `<details class="block advanced-settings">
+      <summary>${t.advancedTitle}</summary>
+      <p class="description">${t.advancedHelp}</p>
+      <div class="advanced-grid">${Object.entries(TUNING_GROUPS).map(([group, keys]) => `
+        <section><h3>${t[group]}</h3>
+          ${keys.map((key) => {
+            const [min, max, step] = config.tuning_limits[key];
+            return `<div class="setting-row">
+              <label for="heatdial-${key}">${t[key]}</label>
+              ${this.#stepper(`<input type="number" id="heatdial-${key}" name="${key}"
+                value="${escape(config.tuning[key])}" min="${min}" max="${max}"
+                step="${Number.isInteger(step) ? 1 : "any"}" required>`, t[key], step)}
+            </div>`;
+          }).join("")}
+        </section>`).join("")}</div>
+    </details>`;
   }
 
   #stepper(input, label, step) {
@@ -565,12 +594,15 @@ class HeatDialPanel extends HTMLElement {
     status.textContent = t.saving;
     const formData = new FormData(form);
     const values = Object.fromEntries(FIELDS.map((key) => [key, Number(formData.get(key))]));
+    const tuning = Object.fromEntries(Object.keys(config.tuning_limits ?? {}).map((key) => [
+      key, Number(formData.get(key)),
+    ]));
     const dialScale = formData.getAll("scale_row").map((value) => numeric(value));
     const weights = Object.fromEntries(Array.from(form.querySelectorAll("[data-room]"), (input) => [
       input.dataset.room, Number(input.value),
     ]));
     const data = {
-      ...values, shadow_mode: formData.has("shadow_mode"), dial: formData.get("dial"),
+      ...values, ...tuning, shadow_mode: formData.has("shadow_mode"), dial: formData.get("dial"),
       outdoor: formData.get("outdoor"), dial_scale: dialScale.map((value) => value ?? "-").join(";"),
       primary_rooms: Object.keys(weights).filter((key) => weights[key] >= 1),
       secondary_rooms: Object.keys(weights).filter((key) => weights[key] < 1),
@@ -585,7 +617,7 @@ class HeatDialPanel extends HTMLElement {
         status.textContent = t[result.errors?.base] ?? t.saveError;
         return;
       }
-      this.#config = { ...config, ...data, settings: values, dial_scale: dialScale, room_weights: weights };
+      this.#config = { ...config, ...data, settings: values, tuning, dial_scale: dialScale, room_weights: weights };
       status.textContent = t.saved;
     } catch {
       status.classList.add("error");

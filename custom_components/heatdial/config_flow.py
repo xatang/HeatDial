@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_ROOM_WEIGHTS, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER, DOMAIN
-from .engine import Settings, dial_position, number, parse_scale, room_weights
+from .engine import TUNING_LIMITS, Settings, Tuning, dial_position, number, parse_scale, read_tuning, room_weights
 
-_DEFAULTS = {**asdict(Settings()), CONF_SECONDARY: [], CONF_SHADOW: True}
+_DEFAULTS = {**asdict(Settings()), **asdict(Tuning()), CONF_SECONDARY: [], CONF_SHADOW: True}
 _DEFAULTS.pop("max_dial")
 _TEMP = {"domain": "sensor", "device_class": "temperature"}
 
@@ -42,6 +42,10 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
         else:
             minimum, maximum, step = 0, 24, 1
         schema[probatio.Required(key, default=current.get(key, default))] = selector.NumberSelector(
+            {"min": minimum, "max": maximum, "step": step, "mode": "box"}
+        )
+    for key, (minimum, maximum, step) in TUNING_LIMITS.items():
+        schema[probatio.Optional(key, default=current.get(key, _DEFAULTS[key]))] = selector.NumberSelector(
             {"min": minimum, "max": maximum, "step": step, "mode": "box"}
         )
     return probatio.Schema(schema)
@@ -75,6 +79,10 @@ def _normalize(hass: HomeAssistant, data: dict[str, Any]) -> tuple[dict, str | N
         room_weights(normalized[CONF_ROOM_WEIGHTS], normalized[CONF_PRIMARY], normalized[CONF_SECONDARY])
     except ValueError:
         return normalized, "invalid_room_weights"
+    try:
+        normalized.update(asdict(read_tuning(normalized)))
+    except ValueError:
+        return normalized, "invalid_tuning"
     scale = normalized[CONF_DIAL_SCALE].strip()
     if scale:
         try:

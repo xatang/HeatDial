@@ -84,6 +84,12 @@ export const styles = `
   .legend i { display: inline-block; width: 16px; margin-right: 6px; vertical-align: middle; border-top: 2px solid var(--series); }
   .settings-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; align-items:start; }
   .settings-column { display:grid; gap:14px; min-width:0; }
+  .advanced-settings { grid-column:1 / -1; }
+  .advanced-settings summary { cursor:pointer; font-size:17px; font-weight:650; }
+  .advanced-settings p { margin-top:8px; }
+  .advanced-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr)); gap:14px; margin-top:14px; }
+  .advanced-grid section { padding:12px; min-width:0; border:1px solid var(--line); border-radius:10px; }
+  .advanced-grid h3 { margin:0; font-size:15px; }
   .setting-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; border-top:1px solid var(--line); padding-top:8px; margin-top:8px; font-size:14px; }
   .stepper { display:grid; grid-template-columns:26px 53px 26px; align-items:center; gap:3px; }
   .stepper button { padding:0; height:26px; border-radius:50%; }
