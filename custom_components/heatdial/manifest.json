@@ -1,0 +1,11 @@
+{
+  "domain": "heatdial",
+  "name": "HeatDial",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/xatang/HeatDial#readme",
+  "integration_type": "helper",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/xatang/HeatDial/issues",
+  "version": "0.1.0"
+}
