@@ -24,6 +24,8 @@ export const styles = `
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; }
   .block { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 19px; min-width: 0; }
+  .overview { gap: 18px; }
+  .overview .headline { font-size: clamp(24px, 4vw, 38px); }
   .main { border-inline-start: 4px solid var(--accent); }
   .main[data-advice="raise"] { border-inline-start-color: var(--warning-color, var(--accent)); }
   .main[data-advice="lower"] { border-inline-start-color: var(--info-color, var(--accent)); }
@@ -34,14 +36,38 @@ export const styles = `
   .mode span { border: 1px solid var(--line); border-radius: 30px; padding: 2px 10px; font-size: 13px; }
   dl { margin: 16px 0 0; }
   .dial-states { display: flex; flex-wrap: wrap; gap: 12px 44px; }
+  .dial-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .dial-summary > div { border-top:1px solid var(--line); padding-top:9px; }
+  .dial-summary dd { font-size:30px; }
   dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
   .dial-states dd, .temperature { font-size: 27px; letter-spacing: -.02em; }
   .facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+  .weather-now { margin-top:10px; }
+  .weather-now strong { font-size:clamp(25px,4vw,34px); font-weight:650; font-variant-numeric:tabular-nums; }
+  .weather-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr)); gap:10px 16px; }
+  .weather-facts > div { border-top:1px solid var(--line); padding-top:8px; }
+  .weather-facts dt { font-size:13px; }
+  .weather-facts dd { font-size:19px; }
   .rooms { grid-column: 1 / -1; }
   .room-list, .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 14px; margin-top: 14px; }
-  .room { padding: 4px 0 4px 12px; border-inline-start: 2px solid var(--line); overflow-wrap: anywhere; }
-  .room.primary { border-color: var(--accent); }
-  .room .temperature { margin-bottom: 2px; }
+  .room-list { grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); }
+  .room-heading { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 14px; margin-top:2px; }
+  .room-card { --state-color:var(--success-color,var(--accent)); padding:15px; }
+  .room-card[data-comfort="cool"] { --state-color:var(--info-color,var(--accent)); }
+  .room-card[data-comfort="warm"] { --state-color:var(--warning-color,var(--accent)); }
+  .room-card[data-comfort="missing"] { --state-color:var(--muted); }
+  .room-card-title { display:flex; align-items:start; flex-wrap:wrap; justify-content:space-between; gap:4px 8px; }
+  .room-card-title h3 { margin:0; font-size:14px; font-weight:650; overflow-wrap:anywhere; }
+  .room-card-title small { border:1px solid var(--line); padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .room-card .temperature { margin:8px 0 12px; font-size:29px; font-variant-numeric:tabular-nums; font-weight:650; }
+  .comfort-track { position:relative; display:grid; grid-template-columns:var(--edge) 1fr var(--edge); height:8px; }
+  .comfort-track span { background:var(--line); }
+  .comfort-track span:first-child { border-radius:5px 0 0 5px; margin-inline-end:2px; }
+  .comfort-track span:last-of-type { border-radius:0 5px 5px 0; margin-inline-start:2px; }
+  .comfort-track span:nth-child(2) { background:color-mix(in srgb,var(--success-color,var(--accent)) 58%,var(--line)); }
+  .comfort-track i { position:absolute; inset-block:-4px; left:clamp(1px,var(--position),calc(100% - 1px)); width:4px; border-radius:3px; background:var(--state-color); transform:translateX(-50%); outline:1px solid var(--surface); }
+  .room-status { margin-top:10px; font-size:13px; color:var(--state-color); }
+  .room-card[data-monitor="true"] .comfort-track span:nth-child(2) { background:var(--line); }
   .tools, .save-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
   .plots { display: grid; gap: 14px; }
   canvas { display: block; width: 100%; height: 220px; margin-top: 10px; }

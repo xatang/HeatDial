@@ -92,14 +92,24 @@ class HeatDialPanel extends HTMLElement {
     }).format(timestamp);
   }
 
+  #isDay() {
+    const hour = Number(new Intl.DateTimeFormat("en-GB", {
+      hour: "numeric", hourCycle: "h23", timeZone: this.#hass.config?.time_zone,
+    }).format(new Date()));
+    const { day_start, day_end } = this.#config.settings;
+    return day_start <= hour && hour < day_end;
+  }
+
   #update() {
     if (!this.isConnected || !this.#config || !this.#hass) return;
     const current = this.#state;
-    const signature = [this.#locale, current, this.#config];
+    const signature = [this.#locale, current, this.#config, this.#isDay()];
     const old = this.#signature;
     const rebuild = !old || signature[0] !== old[0] || signature[2] !== old[2];
     if (rebuild) this.#renderFrame();
-    if (rebuild || (this.#tab === "overview" && old[1] !== current)) this.#renderTab();
+    if (rebuild || (this.#tab === "overview" && (old[1] !== current || old[3] !== signature[3]))) {
+      this.#renderTab();
+    }
     if (this.#tab === "settings") this.#updateDialPreview();
     this.#signature = signature;
   }
@@ -150,19 +160,21 @@ class HeatDialPanel extends HTMLElement {
       ? `${this.#name(attrs.reason_room)} · ${this.#temp(attrs.reason_room_temperature_c)}`
       : "";
     const rooms = Object.entries(config.room_weights);
+    const day = this.#isDay();
+    const { day_min, day_max, night_min } = config.settings;
+    const minimum = day ? day_min : night_min;
     const facts = Object.entries({
-      outdoor: attrs.outdoor_temperature_c,
       trend: attrs.outdoor_change_4h_c,
       low: attrs.forecast_sustained_low_c,
       end: attrs.forecast_end_c,
     });
-    page.innerHTML = `<div class="layout">
+    page.innerHTML = `<div class="layout overview">
       <section class="block main" data-advice="${action}">
         <p class="label">${t.decision}</p>
         <h2 class="headline">${t[action].replace("{dial}", rec)}</h2>
         ${reason ? `<p>${reason}</p>` : ""}
         ${detail ? `<p class="description">${escape(detail)}</p>` : ""}
-        <dl class="dial-states">
+        <dl class="dial-states dial-summary">
           <div><dt>${t.current}</dt><dd>${current ?? "—"}</dd>${flow(current)}</div>
           <div><dt>${t.recommended}</dt><dd>${rec ?? "—"}</dd>${flow(rec)}</div>
         </dl>
@@ -170,24 +182,42 @@ class HeatDialPanel extends HTMLElement {
           ${state?.last_updated ? `<span>${t.updated} ${this.#time(new Date(state.last_updated))}</span>` : ""}
         </div>
       </section>
-      <section class="block">
+      <section class="block weather">
         <h2>${t.outside}</h2>
-        <dl class="facts">${facts.filter(([, value]) => value != null).map(([key, value]) =>
-          `<div><dt>${t[key]}</dt><dd>${this.#temp(value)}</dd></div>`
+        <div class="weather-now"><strong>${this.#temp(attrs.outdoor_temperature_c)}</strong><p class="description">${t.outdoor}</p></div>
+        <dl class="weather-facts">${facts.filter(([, value]) => value != null).map(([key, value]) =>
+          `<div><dt>${t[key]}</dt><dd>${key === "trend" && value > 0 ? "+" : ""}${this.#temp(value)}</dd></div>`
         ).join("")}</dl>
         ${attrs.forecast_sustained_low_c == null ? `<p class="description">${t.noForecast}</p>` : ""}
       </section>
-      <section class="block rooms">
-        <h2>${t.rooms}</h2>
-        <p class="description">${t.day} ${config.settings.day_min}–${config.settings.day_max} °C · ${t.night} ${this.#temp(config.settings.night_min)}</p>
-        <div class="room-list">${rooms.map(([id, weight]) => `
-          <div class="room ${config.primary_rooms.includes(id) ? "primary" : ""}">
-            <div>${escape(this.#name(id))}</div>
-            <div class="temperature">${this.#temp(attrs.room_temperatures_c?.[id])}</div>
-            <small>${t.weight} ${new Intl.NumberFormat(this.#locale).format(weight)}</small>
-          </div>`).join("")}</div>
+      <section class="rooms">
+        <div class="room-heading"><h2>${t.rooms}</h2>
+          <p class="description">${day ? t.day : t.nightComfort} ${this.#temp(minimum)} – ${this.#temp(day_max)}</p></div>
+        <div class="room-list">${rooms.map(([id, weight]) =>
+          this.#roomCard(id, weight, numeric(attrs.room_temperatures_c?.[id]), minimum, day_max)
+        ).join("")}</div>
       </section>
     </div>`;
+  }
+
+  #roomCard(id, weight, value, minimum, maximum) {
+    const t = this.#t;
+    const status = value === null ? "missing" : value < minimum ? "cool" : value > maximum ? "warm" : "comfort";
+    const span = maximum - minimum + 4;
+    const edge = 200 / span;
+    const position = value === null ? 0 : Math.max(0, Math.min(100, (value - minimum + 2) / span * 100));
+    const quality = status === "cool" ? t.belowComfort : status === "warm" ? t.aboveComfort
+      : status === "comfort" ? t.inComfort : t.noRoomReading;
+    const weightLabel = weight === 0 ? t.roomMonitor
+      : `${t.weight} ${new Intl.NumberFormat(this.#locale).format(weight)}`;
+    return `<article class="block room-card" data-comfort="${status}" data-monitor="${weight === 0}">
+      <div class="room-card-title"><h3>${escape(this.#name(id))}</h3><small>${weightLabel}</small></div>
+      <div class="temperature">${this.#temp(value)}</div>
+      <div class="comfort-track" style="--edge:${edge}%;--position:${position}%" aria-hidden="true">
+        <span></span><span></span><span></span>${value === null ? "" : "<i></i>"}
+      </div>
+      <p class="room-status">${quality}</p>
+    </article>`;
   }
 
   #historyTab(page) {
