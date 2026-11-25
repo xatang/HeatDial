@@ -125,6 +125,20 @@ class HeatDialTests(unittest.TestCase):
         self.assertIsNone(engine.dial_position(2.5, 3))
         self.assertIsNone(engine.dial_position("nan", 3))
 
+    def test_scale_allows_positions_above_the_old_verified_limit(self):
+        scale = engine.resolve_scale("40;47;56;63;70;77", 6)
+        self.assertEqual(scale, (40, 47, 56, 63, 70, 77))
+        advice = self.check(dial=3, kitchen=22.1, settings=engine.Settings(max_dial=len(scale)))
+        self.assertEqual((advice.action, advice.recommended), ("raise", 4))
+
+    def test_scale_accepts_missing_and_decimal_temperatures(self):
+        self.assertEqual(engine.parse_scale("40;-;56,5"), (40, None, 56.5))
+        self.assertEqual(engine.resolve_scale("", 4), (None,) * 4)
+        self.assertEqual(engine.resolve_scale("40;47;56", 2), (40, 47))
+        for invalid in ("47;40", "nan", "101", "40;40"):
+            with self.assertRaises(ValueError):
+                engine.parse_scale(invalid)
+
     def test_short_step_request_stays_out_of_the_recommendation(self):
         step = engine.Advice("raise", "overnight_cold", 2, 3)
         advice, pending = engine.confirm_advice(step, None, 0)

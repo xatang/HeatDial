@@ -7,13 +7,14 @@ from typing import Any
 import probatio
 
 from homeassistant import config_entries
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
-from .const import CONF_DIAL, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER, DOMAIN
-from .engine import Settings, number
+from .const import CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER, DOMAIN
+from .engine import Settings, dial_position, number, parse_scale
 
 _DEFAULTS = {**asdict(Settings()), CONF_SECONDARY: [], CONF_SHADOW: True}
+_DEFAULTS.pop("max_dial")
 _TEMP = {"domain": "sensor", "device_class": "temperature"}
 
 
@@ -26,6 +27,7 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
         (CONF_PRIMARY, selector.EntitySelector({"filter": [_TEMP], "multiple": True}), True),
         (CONF_SECONDARY, selector.EntitySelector({"filter": [_TEMP], "multiple": True}), False),
         (CONF_SHADOW, selector.BooleanSelector(), True),
+        (CONF_DIAL_SCALE, selector.TextSelector(), False),
     ):
         marker = probatio.Required if required else probatio.Optional
         options = {"description": {"suggested_value": current[key]}} if current.get(key) is not None else {}
@@ -33,8 +35,8 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
 
     for key, default in asdict(Settings()).items():
         if key == "max_dial":
-            minimum, maximum, step = 1, 12, 1
-        elif key in ("day_min", "day_max", "night_min"):
+            continue
+        if key in ("day_min", "day_max", "night_min"):
             minimum, maximum, step = 10, 35, 0.5
         else:
             minimum, maximum, step = 0, 24, 1
@@ -44,9 +46,10 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
     return probatio.Schema(schema)
 
 
-def _normalize(data: dict[str, Any]) -> tuple[dict, str | None]:
-    normalized = {CONF_WEATHER: None, CONF_SECONDARY: [], **data}
+def _normalize(hass: HomeAssistant, data: dict[str, Any]) -> tuple[dict, str | None]:
+    normalized = {CONF_WEATHER: None, CONF_SECONDARY: [], CONF_DIAL_SCALE: "", **data}
     defaults = asdict(Settings())
+    defaults.pop("max_dial")
     for key, default in defaults.items():
         value = number(data[key])
         if value is None or (isinstance(default, int) and not value.is_integer()):
@@ -67,6 +70,16 @@ def _normalize(data: dict[str, Any]) -> tuple[dict, str | None]:
     ]
     if not normalized[CONF_PRIMARY] or len(set(inputs)) != len(inputs):
         return normalized, "duplicate_sensor"
+    scale = normalized[CONF_DIAL_SCALE].strip()
+    if scale:
+        try:
+            rows = parse_scale(scale)
+        except ValueError:
+            return normalized, "invalid_scale"
+        helper = hass.states.get(normalized[CONF_DIAL])
+        maximum = dial_position(helper.attributes.get("max"), 24) if helper else None
+        if maximum is not None and len(rows) > maximum:
+            return normalized, "scale_exceeds_helper"
     return normalized, None
 
 
@@ -80,7 +93,7 @@ class HeatDialConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         current = {**_DEFAULTS, **(user_input or {})}
         errors = {}
         if user_input is not None:
-            data, error = _normalize(user_input)
+            data, error = _normalize(self.hass, user_input)
             if not error:
                 return self.async_create_entry(title="HeatDial", data=data)
             errors["base"] = error
@@ -99,7 +112,7 @@ class HeatDialOptionsFlow(config_entries.OptionsFlowWithReload):
         current = {**_DEFAULTS, **self.config_entry.data, **self.config_entry.options}
         errors = {}
         if user_input is not None:
-            data, error = _normalize(user_input)
+            data, error = _normalize(self.hass, user_input)
             if not error:
                 return self.async_create_entry(data=data)
             current = data

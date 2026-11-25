@@ -14,13 +14,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DIAL, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER,
+    CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER,
     DOMAIN, FORECAST_INTERVAL, FORECAST_MAX_AGE, SENSOR_MAX_AGE, UPDATE_INTERVAL,
 )
 from .engine import (
     HOUR, MINUTE, HISTORY_SECONDS, MAX_GAP, Advice, Point, Reading, Settings, Weather,
     confirm_advice, continuous, decide, dial_position, forecast_horizon, number,
-    recorded_readings, weather_signal,
+    recorded_readings, resolve_scale, weather_signal,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,9 +57,14 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=UPDATE_INTERVAL
         )
         self.config = {**entry.data, **entry.options}
+        helper = hass.states.get(self.config[CONF_DIAL])
+        self.scale = resolve_scale(
+            self.config.get(CONF_DIAL_SCALE, ""), helper.attributes.get("max") if helper else None
+        )
         self.settings = Settings(**{
-            key: self.config[key] for key in Settings.__dataclass_fields__ if key in self.config
-        })
+            key: self.config[key]
+            for key in Settings.__dataclass_fields__ if key in self.config and key != "max_dial"
+        }, max_dial=len(self.scale))
         self.primary = tuple(self.config[CONF_PRIMARY])
         self.secondary = tuple(self.config.get(CONF_SECONDARY, ()))
         self.shadow = self.config.get(CONF_SHADOW, True)

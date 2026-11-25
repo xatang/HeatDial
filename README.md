@@ -13,7 +13,7 @@ In Home Assistant, go to **Settings → Marketplace → Add from link**, enter `
 - Select an existing numeric helper for the actual dial position. Update this helper when you turn the physical dial.
 - Select a local outdoor thermometer and, if available, a weather entity with an hourly forecast.
 - Select the main rooms that should drive the heating advice. Additional rooms can call for heat after sustained cooling, provided the house still has room to warm up. Leave rooms with significant local heat gains out of both groups.
-- Set the day and night comfort limits, reduction hours, and evening check hours. Start with only measured dial positions. HeatDial recommends one physical step at a time.
+- Set the day and night comfort limits, reduction hours, and evening check hours. Each row in the dial scale adds a usable position. Water temperatures can be approximate or left blank. HeatDial recommends one physical step at a time.
 - Leave **Shadow mode** enabled while comparing the advice with observed temperatures. The default is on.
 
 Place room thermometers at comparable heights, away from radiators, direct sunlight, and drafts. Choose comfort limits and operating hours that suit your household.
@@ -30,7 +30,7 @@ Open **Settings → Devices & services → Integrations → HeatDial → Open He
 
 - **Overview** shows the recorded dial position, the advice, the room temperatures and the weather outlook used in the decision.
 - **History** charts room temperatures and dial positions for the last 24 hours or three days.
-- **Settings** changes the comfort range, schedule and shadow mode. Use the integration's options to change the sensor assignments.
+- **Settings** changes the comfort range, schedule, data sources, dial scale and shadow mode.
 
 You can also add these entities to an existing dashboard:
 

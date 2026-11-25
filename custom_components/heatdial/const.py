@@ -4,6 +4,7 @@ from datetime import timedelta
 
 DOMAIN = "heatdial"
 CONF_DIAL = "dial"
+CONF_DIAL_SCALE = "dial_scale"
 CONF_OUTDOOR = "outdoor"
 CONF_WEATHER = "weather"
 CONF_PRIMARY = "primary_rooms"

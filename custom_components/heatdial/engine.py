@@ -111,6 +111,33 @@ def dial_position(value: object, maximum: int) -> int | None:
     return None
 
 
+def parse_scale(value: str) -> tuple[float | None, ...]:
+    """Parse rows separated by semicolons. A dash means unknown temperature."""
+    scale = []
+    for part in value.strip().split(";"):
+        part = part.strip()
+        if part in {"", "-"}:
+            scale.append(None)
+        else:
+            temperature = number(part.replace(",", "."))
+            if temperature is None or not 0 < temperature <= 100:
+                raise ValueError("Invalid water temperature")
+            scale.append(temperature)
+    known = [temperature for temperature in scale if temperature is not None]
+    if len(scale) > 24 or any(left >= right for left, right in zip(known, known[1:])):
+        raise ValueError("Invalid dial scale")
+    return tuple(scale)
+
+
+def resolve_scale(value: str, helper_max: object) -> tuple[float | None, ...]:
+    """Use the configured table or create blank rows from the recorded dial helper."""
+    maximum = dial_position(helper_max, 24)
+    if not value.strip():
+        return (None,) * (maximum or 6)
+    scale = parse_scale(value)
+    return scale[:maximum] if maximum is not None else scale
+
+
 def continuous(history: Sequence[Reading]) -> list[Reading]:
     """Use only consecutive readings, so downtime cannot confirm a condition."""
     for index in range(len(history) - 1, 0, -1):

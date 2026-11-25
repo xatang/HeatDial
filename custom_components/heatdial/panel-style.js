@@ -48,10 +48,20 @@ export const styles = `
   .legend { padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 8px 18px; list-style: none; font-size: 13px; }
   .legend i { display: inline-block; width: 16px; margin-right: 6px; vertical-align: middle; border-top: 2px solid var(--series); }
   .form-grid label { display: grid; gap: 5px; font-size: 14px; }
+  .source-fields { display:grid; gap:12px; margin-top:14px; }
+  .source-fields > label { display:grid; gap:5px; min-width:0; }
+  .source-fields select { width:100%; min-width:0; text-overflow:ellipsis; }
+  fieldset { min-width:0; border:1px solid var(--line); border-radius:8px; margin:0; padding:8px; }
+  .room-options { max-height:135px; overflow:auto; }
+  .check-row { display:flex; align-items:start; gap:8px; padding:4px; overflow-wrap:anywhere; }
+  .check-row input { flex:none; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; text-align:left; }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--line); }
+  td input { max-width:130px; }
   input[type="number"] { width: 100%; min-width: 0; }
   input[type="checkbox"] { accent-color: var(--accent); }
   .checkbox { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
-  .save-row { margin: 18px 0 0; }
+  .save-row { margin: 0; grid-column:1 / -1; }
   .save-row button { color: var(--text-primary-color, var(--primary-background-color)); background: var(--accent); border-color: transparent; font-weight: 600; }
   .error { color: var(--error-color, var(--primary-text-color)); }
   @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } .wrap { width: calc(100% - 24px); padding-top: 18px; } .block { padding: 14px; } }

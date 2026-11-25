@@ -6,7 +6,7 @@ const OPTIONS = "config/config_entries/options/flow";
 const HOUR_MS = 3600000;
 const FIELDS = [
   "day_min", "day_max", "night_min", "day_start", "day_end",
-  "lower_from", "lower_until", "evening_from", "evening_until", "max_dial",
+  "lower_from", "lower_until", "evening_from", "evening_until",
 ];
 const CHART_COLORS = ["--primary-color", "--warning-color", "--success-color", "--info-color",
   "--accent-color"];
@@ -139,6 +139,10 @@ class HeatDialPanel extends HTMLElement {
     const attrs = state?.attributes ?? {};
     const rec = numeric(attrs.recommended_dial);
     const current = numeric(attrs.current_dial);
+    const flow = (dial) => {
+      const value = config.dial_scale?.[dial - 1];
+      return value == null ? "" : `<small>≈ ${this.#temp(value)}</small>`;
+    };
     const action = rec != null && ["hold", "raise", "lower"].includes(state?.state) ? state.state : "wait";
     const reason = t.reasons[attrs.reason];
     const detail = attrs.reason_room
@@ -158,8 +162,8 @@ class HeatDialPanel extends HTMLElement {
         ${reason ? `<p>${reason}</p>` : ""}
         ${detail ? `<p class="description">${escape(detail)}</p>` : ""}
         <dl class="dial-states">
-          <div><dt>${t.current}</dt><dd>${current ?? "—"}</dd></div>
-          <div><dt>${t.recommended}</dt><dd>${rec ?? "—"}</dd></div>
+          <div><dt>${t.current}</dt><dd>${current ?? "—"}</dd>${flow(current)}</div>
+          <div><dt>${t.recommended}</dt><dd>${rec ?? "—"}</dd>${flow(rec)}</div>
         </dl>
         <div class="mode"><span>${config.shadow_mode ? t.shadow : t.notices}</span>
           ${state?.last_updated ? `<span>${t.updated} ${this.#time(new Date(state.last_updated))}</span>` : ""}
@@ -310,39 +314,79 @@ class HeatDialPanel extends HTMLElement {
   #settings(page) {
     const t = this.#t;
     const config = this.#config;
-    const groups = Object.entries({
-      primary: config.primary_rooms.map((id) => this.#name(id)).join(", "),
-      secondary: config.secondary_rooms.map((id) => this.#name(id)).join(", "),
-      outdoor: this.#name(config.outdoor), current: this.#name(config.dial),
-      weatherSource: this.#name(config.weather),
-    });
-    page.innerHTML = `<div class="layout">
+    const states = Object.entries(this.#hass.states);
+    const temperatures = states.filter(([, state]) => state.attributes.device_class === "temperature")
+      .map(([id]) => id).filter((id) => id.startsWith("sensor."));
+    const dialIds = states.filter(([id, state]) => /^(input_number|number)\./.test(id)
+      || (id.startsWith("sensor.") && numeric(state.state) !== null)).map(([id]) => id);
+    const weatherIds = Object.keys(this.#hass.states).filter((id) => id.startsWith("weather."));
+    const ordered = (ids, saved) => [...new Set([...ids, ...saved].filter(Boolean))].sort(
+      (left, right) => this.#name(left).localeCompare(this.#name(right), this.#locale)
+    );
+    const select = (key, label, ids, saved, optional = false) => `<label>${label}
+      <select name="${key}" ${optional ? "" : "required"}>
+        <option value="" ${optional ? "" : "disabled"}>—</option>
+        ${ordered(ids, [saved]).map((id) => `<option value="${escape(id)}" ${saved === id ? "selected" : ""}>${escape(this.#name(id))}</option>`).join("")}
+      </select></label>`;
+    const rooms = (key, label, saved) => `<fieldset><legend>${label}</legend>
+      <div class="room-options">${ordered(temperatures, saved).map((id) => `
+        <label class="check-row"><input type="checkbox" name="${key}" value="${escape(id)}"
+          ${saved.includes(id) ? "checked" : ""}>${escape(this.#name(id))}</label>`).join("")}</div>
+    </fieldset>`;
+    page.innerHTML = `<form class="layout">
       <section class="block"><h2>${t.settingsTitle}</h2>
-        <form><div class="form-grid">${FIELDS.map((key) => {
+        <div class="form-grid">${FIELDS.map((key) => {
           const temperature = key.endsWith("_min") || key === "day_max";
-          const limit = key === "max_dial";
           return `<label>${t[key]}<input type="number" name="${key}" value="${escape(config.settings[key])}"
-            min="${temperature ? 10 : limit ? 1 : 0}" max="${temperature ? 35 : limit ? 12 : 24}"
+            min="${temperature ? 10 : 0}" max="${temperature ? 35 : 24}"
             step="${temperature ? 0.5 : 1}" required></label>`;
         }).join("")}</div>
         <label class="checkbox"><input type="checkbox" name="shadow_mode" ${config.shadow_mode ? "checked" : ""}>${t.shadowMode}</label>
-        <div class="save-row"><button type="submit">${t.save}</button><span role="status"></span></div>
-        </form>
       </section>
       <section class="block"><h2>${t.inputs}</h2>
-        <dl class="facts">${groups.map(([key, value]) =>
-          `<div><dt>${t[key]}</dt><dd>${escape(value || "—")}</dd></div>`
-        ).join("")}</dl>
-        <p><a href="${INTEGRATION}">${t.editInputs}</a></p>
+        <div class="source-fields">
+          ${select("dial", t.current, dialIds, config.dial)}
+          ${select("outdoor", t.outdoor, temperatures, config.outdoor)}
+          ${select("weather", t.weatherSource, weatherIds, config.weather, true)}
+          ${rooms("primary_rooms", t.primaryRooms, config.primary_rooms)}
+          ${rooms("secondary_rooms", t.secondaryRooms, config.secondary_rooms)}
+        </div>
       </section>
-    </div>`;
-    page.querySelector("form").addEventListener("submit", (event) => this.#save(event));
+      <section class="block"><h2>${t.scale}</h2><p class="description">${t.scaleHelp}</p>
+        <table><thead><tr><th scope="col">${t.dialStep}</th><th scope="col">${t.water}</th></tr></thead>
+          <tbody id="scale-rows"></tbody></table>
+        <div class="tools">
+          <button type="button" data-scale="add">${t.addStep}</button>
+          <button type="button" data-scale="remove">${t.removeStep}</button>
+        </div>
+      </section>
+      <div class="save-row"><button type="submit">${t.save}</button><span role="status"></span></div>
+    </form>`;
+    const form = page.querySelector("form");
+    const table = form.querySelector("#scale-rows");
+    const renderScale = (values) => {
+      table.innerHTML = values.map((value, index) => `<tr><th scope="row">${index + 1}</th>
+        <td><input type="number" name="scale_row" min="0.1" max="100" step="any"
+          aria-label="${t.water}, ${t.dialStep} ${index + 1}" value="${escape(value)}"></td></tr>`).join("");
+      form.querySelector('[data-scale="remove"]').disabled = values.length <= 1;
+      form.querySelector('[data-scale="add"]').disabled = values.length >= 24;
+    };
+    renderScale(config.dial_scale ?? [null]);
+    for (const button of form.querySelectorAll("[data-scale]")) {
+      button.addEventListener("click", () => {
+        const values = Array.from(table.querySelectorAll("input"), (input) => input.value);
+        if (button.dataset.scale === "add") values.push(null);
+        else values.pop();
+        renderScale(values);
+      });
+    }
+    form.addEventListener("submit", (event) => this.#save(event));
   }
 
   async #save(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const button = form.querySelector("button");
+    const button = form.querySelector('button[type="submit"]');
     const status = form.querySelector("[role=status]");
     const t = this.#t;
     const config = this.#config;
@@ -351,11 +395,13 @@ class HeatDialPanel extends HTMLElement {
     status.textContent = t.saving;
     const formData = new FormData(form);
     const values = Object.fromEntries(FIELDS.map((key) => [key, Number(formData.get(key))]));
+    const dialScale = formData.getAll("scale_row").map((value) => numeric(value));
     const data = {
-      ...values, shadow_mode: formData.has("shadow_mode"), dial: config.dial, outdoor: config.outdoor,
-      primary_rooms: config.primary_rooms, secondary_rooms: config.secondary_rooms,
+      ...values, shadow_mode: formData.has("shadow_mode"), dial: formData.get("dial"),
+      outdoor: formData.get("outdoor"), dial_scale: dialScale.map((value) => value ?? "-").join(";"),
+      primary_rooms: formData.getAll("primary_rooms"), secondary_rooms: formData.getAll("secondary_rooms"),
     };
-    if (config.weather) data.weather = config.weather;
+    if (formData.get("weather")) data.weather = formData.get("weather");
     try {
       const flow = await this.#hass.callApi("POST", OPTIONS, { handler: config.entry_id });
       const result = await this.#hass.callApi("POST", `${OPTIONS}/${flow.flow_id}`, data);
@@ -364,7 +410,7 @@ class HeatDialPanel extends HTMLElement {
         status.textContent = t[result.errors?.base] ?? t.saveError;
         return;
       }
-      this.#config = { ...this.#config, settings: values, shadow_mode: data.shadow_mode };
+      this.#config = { ...config, ...data, settings: values, dial_scale: dialScale };
       status.textContent = t.saved;
     } catch {
       status.classList.add("error");

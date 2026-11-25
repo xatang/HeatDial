@@ -37,6 +37,7 @@ async def async_register_heatdial_panel(hass: HomeAssistant, entry: "HeatDialEnt
     config = {
         "entry_id": entry.entry_id,
         "settings": asdict(coordinator.settings),
+        "dial_scale": list(coordinator.scale),
         "shadow_mode": coordinator.shadow,
         "dial": coordinator.config[CONF_DIAL],
         "outdoor": coordinator.config[CONF_OUTDOOR],
