@@ -10,8 +10,8 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
-from .const import CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER, DOMAIN
-from .engine import Settings, dial_position, number, parse_scale
+from .const import CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_ROOM_WEIGHTS, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER, DOMAIN
+from .engine import Settings, dial_position, number, parse_scale, room_weights
 
 _DEFAULTS = {**asdict(Settings()), CONF_SECONDARY: [], CONF_SHADOW: True}
 _DEFAULTS.pop("max_dial")
@@ -28,6 +28,7 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
         (CONF_SECONDARY, selector.EntitySelector({"filter": [_TEMP], "multiple": True}), False),
         (CONF_SHADOW, selector.BooleanSelector(), True),
         (CONF_DIAL_SCALE, selector.TextSelector(), False),
+        (CONF_ROOM_WEIGHTS, selector.TextSelector(), False),
     ):
         marker = probatio.Required if required else probatio.Optional
         options = {"description": {"suggested_value": current[key]}} if current.get(key) is not None else {}
@@ -47,7 +48,7 @@ def _schema(current: Mapping[str, Any]) -> probatio.Schema:
 
 
 def _normalize(hass: HomeAssistant, data: dict[str, Any]) -> tuple[dict, str | None]:
-    normalized = {CONF_WEATHER: None, CONF_SECONDARY: [], CONF_DIAL_SCALE: "", **data}
+    normalized = {CONF_WEATHER: None, CONF_SECONDARY: [], CONF_DIAL_SCALE: "", CONF_ROOM_WEIGHTS: "", **data}
     defaults = asdict(Settings())
     defaults.pop("max_dial")
     for key, default in defaults.items():
@@ -68,8 +69,12 @@ def _normalize(hass: HomeAssistant, data: dict[str, Any]) -> tuple[dict, str | N
         normalized[CONF_DIAL], normalized[CONF_OUTDOOR],
         *normalized[CONF_PRIMARY], *normalized[CONF_SECONDARY],
     ]
-    if not normalized[CONF_PRIMARY] or len(set(inputs)) != len(inputs):
+    if len(set(inputs)) != len(inputs):
         return normalized, "duplicate_sensor"
+    try:
+        room_weights(normalized[CONF_ROOM_WEIGHTS], normalized[CONF_PRIMARY], normalized[CONF_SECONDARY])
+    except ValueError:
+        return normalized, "invalid_room_weights"
     scale = normalized[CONF_DIAL_SCALE].strip()
     if scale:
         try:

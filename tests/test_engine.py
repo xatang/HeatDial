@@ -49,6 +49,28 @@ class HeatDialTests(unittest.TestCase):
         advice = self.check(dial=3)
         self.assertEqual((advice.action, advice.recommended), ("hold", 3))
 
+    def test_legacy_room_weights_and_monitor_only_rooms(self):
+        self.assertEqual(engine.room_weights("", ["a"], ["b"]), {"a": 1, "b": 0.5})
+        weights = engine.room_weights('{"a": 1.5, "b": 0, "c": 0.2}', ["a"], ["b", "c"])
+        self.assertEqual(engine.room_groups(weights), (("a",), ("c",)))
+        self.assertEqual(engine.room_groups({"a": 0.3, "b": 0.5}), (("b",), ("a",)))
+        with self.assertRaises(ValueError):
+            engine.room_weights('{"a": 0}', ["a"], [])
+
+    def test_higher_weight_responds_to_cooling_sooner(self):
+        now = datetime(2026, 11, 24, 15, 0, tzinfo=LOCAL)
+        end = now.timestamp()
+        history = [
+            engine.Reading(end - elapsed * 60, 2, 3, {"room": 22.8 if elapsed <= 35 else 23.3})
+            for elapsed in range(180, -1, -5)
+        ]
+        for weight, expected in [(1.0, "hold"), (2.0, "raise")]:
+            result = engine.decide(
+                engine.Settings(), now, history, ["room"], [], engine.Weather(3), None,
+                {"room": weight},
+            )
+            self.assertEqual(result.action, expected)
+
     def test_observed_evening_cooling_can_raise_before_rooms_are_cold(self):
         advice = self.check(
             hour=20, kitchen=23.8, grandma=24.7, decline=0.25,

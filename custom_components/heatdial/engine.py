@@ -1,8 +1,9 @@
 """Decide when a manual boiler adjustment is worthwhile."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+import json
 from math import isfinite
 from statistics import median
 
@@ -136,6 +137,32 @@ def resolve_scale(value: str, helper_max: object) -> tuple[float | None, ...]:
         return (None,) * (maximum or 6)
     scale = parse_scale(value)
     return scale[:maximum] if maximum is not None else scale
+
+
+def room_weights(raw: str, primary: Sequence[str], secondary: Sequence[str]) -> dict[str, float]:
+    """Load per-sensor weights and retain defaults for older config entries."""
+    weights = {key: 1.0 for key in primary}
+    weights.update({key: 0.5 for key in secondary})
+    values = json.loads(raw) if raw.strip() else {}
+    if not isinstance(values, dict):
+        raise ValueError("Expected a room weight object")
+    for key in weights.keys() & values.keys():
+        weight = number(values[key])
+        if weight is None or not 0 <= weight <= 2:
+            raise ValueError("Room weight must be between 0 and 2")
+        weights[key] = weight
+    if not any(weights.values()):
+        raise ValueError("At least one room must have positive weight")
+    return weights
+
+
+def room_groups(weights: Mapping[str, float]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Keep priority rooms above the standard weight, or promote the strongest."""
+    threshold = min(1.0, max(weights.values()))
+    return (
+        tuple(key for key, weight in weights.items() if weight >= threshold),
+        tuple(key for key, weight in weights.items() if 0 < weight < threshold),
+    )
 
 
 def continuous(history: Sequence[Reading]) -> list[Reading]:
@@ -275,9 +302,11 @@ def decide(
     secondary_ids: Sequence[str],
     weather: Weather,
     last_dial_change: float | None,
+    weights: Mapping[str, float] | None = None,
 ) -> Advice:
     """Recommend holding or a single physical step, with a stable reason code."""
     current = history[-1]
+    weights = weights or {key: 1.0 for key in primary_ids} | {key: 0.5 for key in secondary_ids}
     dial = current.dial
     if dial is None:
         return Advice("wait", "dial_unavailable", None, None)
@@ -300,7 +329,7 @@ def decide(
     if any(room.airing for room in primary):
         return advice("hold", "airing")
     all_rooms = [*primary, *secondary]
-    coldest = min(primary, key=lambda room: room.temperature)
+    coldest = min(primary, key=lambda room: (room.temperature - settings.day_min) * weights[room.entity_id])
     warmest = max(all_rooms, key=lambda room: room.temperature)
     daytime = settings.day_start <= now.hour < settings.day_end
     lower = settings.day_min if daytime else settings.night_min
@@ -312,17 +341,25 @@ def decide(
             lambda item: item.rooms.get(room.entity_id, float("inf")) < limit,
         )
 
-    cold = sustained_cold(coldest, lower - 0.7, 30 * MINUTE) or (
-        sustained_cold(coldest, lower, HOUR)
-        and (coldest.delta is None or coldest.delta < 0.1)
-    )
-    if cold:
+    def priority_cold(room: Room) -> bool:
+        factor = max(0.25, weights[room.entity_id])
+        return sustained_cold(room, lower - 0.7, int(30 * MINUTE / factor)) or (
+            sustained_cold(room, lower, int(HOUR / factor))
+            and (room.delta is None or room.delta < 0.1)
+        )
+
+    candidates = [room for room in primary if priority_cold(room)]
+    if candidates:
+        cold = min(candidates, key=lambda room: (room.temperature - lower) * weights[room.entity_id])
         if warmest.temperature >= upper:
-            return advice("hold", "room_conflict", coldest)
-        return advice("raise", "room_cold", coldest)
+            return advice("hold", "room_conflict", cold)
+        return advice("raise", "room_cold", cold)
     if daytime and warmest.temperature < upper - 0.5:
-        for room in secondary:
-            if not room.airing and sustained_cold(room, lower - 0.4, 2 * HOUR) and (
+        for room in sorted(secondary, key=lambda item: -weights[item.entity_id]):
+            weight = weights[room.entity_id]
+            if not room.airing and sustained_cold(
+                room, lower - 0.8 * (1 - weight), int(HOUR / max(0.25, weight))
+            ) and (
                 room.delta is None or room.delta < 0.1
             ):
                 return advice("raise", "secondary_cold", room)
@@ -346,7 +383,7 @@ def decide(
 
     if settings.lower_from <= now.hour < settings.lower_until:
         floors = {key: settings.day_min + 0.5 for key in primary_ids}
-        floors.update({key: settings.day_min for key in secondary_ids})
+        floors.update({key: settings.day_min + min(0.0, weights[key] - 0.5) for key in secondary_ids})
         enough_heat = all(current.rooms.get(key, -100) >= floor for key, floor in floors.items())
         cooling_risk = weather.outdoor is None or observed_cooling or forecast_cooling
         if enough_heat and not cooling_risk and not any(room.airing for room in secondary):

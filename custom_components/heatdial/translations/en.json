@@ -11,6 +11,7 @@
           "weather": "Hourly weather source",
           "primary_rooms": "Primary room thermometers",
           "secondary_rooms": "Secondary room thermometers",
+          "room_weights": "Room weights by sensor entity ID (JSON)",
           "shadow_mode": "Shadow mode",
           "day_min": "Day minimum (°C)",
           "day_max": "Day maximum (°C)",
@@ -28,6 +29,7 @@
     "error": {
       "invalid_schedule": "Check the order of the day, evening and reduction hours.",
       "invalid_number": "Use whole hours.",
+      "invalid_room_weights": "Enter weights from 0 to 2, with at least one positive room weight.",
       "invalid_scale": "Enter increasing water temperatures separated by semicolons.",
       "scale_exceeds_helper": "The scale has more positions than the selected dial helper.",
       "invalid_range": "The night minimum must be at or below the day minimum. The day range must be at least 1 °C wide.",
@@ -48,6 +50,7 @@
           "weather": "Hourly weather source",
           "primary_rooms": "Primary room thermometers",
           "secondary_rooms": "Secondary room thermometers",
+          "room_weights": "Room weights by sensor entity ID (JSON)",
           "shadow_mode": "Shadow mode",
           "day_min": "Day minimum (°C)",
           "day_max": "Day maximum (°C)",
@@ -65,6 +68,7 @@
     "error": {
       "invalid_schedule": "Check the order of the day, evening and reduction hours.",
       "invalid_number": "Use whole hours.",
+      "invalid_room_weights": "Enter weights from 0 to 2, with at least one positive room weight.",
       "invalid_scale": "Enter increasing water temperatures separated by semicolons.",
       "scale_exceeds_helper": "The scale has more positions than the selected dial helper.",
       "invalid_range": "The night minimum must be at or below the day minimum. The day range must be at least 1 °C wide.",

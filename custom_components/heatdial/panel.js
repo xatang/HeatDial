@@ -149,7 +149,7 @@ class HeatDialPanel extends HTMLElement {
     const detail = attrs.reason_room
       ? `${this.#name(attrs.reason_room)} · ${this.#temp(attrs.reason_room_temperature_c)}`
       : "";
-    const rooms = [[config.primary_rooms, "primary"], [config.secondary_rooms, "secondary"]];
+    const rooms = Object.entries(config.room_weights);
     const facts = Object.entries({
       outdoor: attrs.outdoor_temperature_c,
       trend: attrs.outdoor_change_4h_c,
@@ -180,12 +180,12 @@ class HeatDialPanel extends HTMLElement {
       <section class="block rooms">
         <h2>${t.rooms}</h2>
         <p class="description">${t.day} ${config.settings.day_min}–${config.settings.day_max} °C · ${t.night} ${this.#temp(config.settings.night_min)}</p>
-        <div class="room-list">${rooms.flatMap(([ids, role]) => ids.map((id) => `
-          <div class="room ${role}">
+        <div class="room-list">${rooms.map(([id, weight]) => `
+          <div class="room ${config.primary_rooms.includes(id) ? "primary" : ""}">
             <div>${escape(this.#name(id))}</div>
             <div class="temperature">${this.#temp(attrs.room_temperatures_c?.[id])}</div>
-            <small>${t[role]}</small>
-          </div>`)).join("")}</div>
+            <small>${t.weight} ${new Intl.NumberFormat(this.#locale).format(weight)}</small>
+          </div>`).join("")}</div>
       </section>
     </div>`;
   }
@@ -209,8 +209,8 @@ class HeatDialPanel extends HTMLElement {
     const request = ++this.#request;
     this.#plots = [];
     plots.textContent = this.#t.loading;
-    const { primary_rooms, secondary_rooms, dial, entities } = this.#config;
-    const rooms = [...primary_rooms, ...secondary_rooms];
+    const { room_weights, dial, entities } = this.#config;
+    const rooms = Object.keys(room_weights);
     const ids = [...rooms, dial, entities.recommended_dial].filter(Boolean);
     const end = Date.now();
     const start = end - hours * HOUR_MS;
@@ -329,11 +329,6 @@ class HeatDialPanel extends HTMLElement {
         <option value="" ${optional ? "" : "disabled"}>—</option>
         ${ordered(ids, [saved]).map((id) => `<option value="${escape(id)}" ${saved === id ? "selected" : ""}>${escape(this.#name(id))}</option>`).join("")}
       </select></label>`;
-    const rooms = (key, label, saved) => `<fieldset><legend>${label}</legend>
-      <div class="room-options">${ordered(temperatures, saved).map((id) => `
-        <label class="check-row"><input type="checkbox" name="${key}" value="${escape(id)}"
-          ${saved.includes(id) ? "checked" : ""}>${escape(this.#name(id))}</label>`).join("")}</div>
-    </fieldset>`;
     page.innerHTML = `<form class="layout">
       <section class="block"><h2>${t.settingsTitle}</h2>
         <div class="form-grid">${FIELDS.map((key) => {
@@ -350,9 +345,14 @@ class HeatDialPanel extends HTMLElement {
           <div class="source-preview"><span>${t.current}</span><output data-dial-preview>—</output></div>
           ${select("outdoor", t.outdoor, temperatures, config.outdoor)}
           ${select("weather", t.weatherSource, weatherIds, config.weather, true)}
-          ${rooms("primary_rooms", t.primaryRooms, config.primary_rooms)}
-          ${rooms("secondary_rooms", t.secondaryRooms, config.secondary_rooms)}
         </div>
+      </section>
+      <section class="block rooms"><h2>${t.rooms}</h2>
+        <p class="description">${t.weightHelp}</p>
+        <div class="selected-rooms"></div>
+        <label class="room-search">${t.addRoom}
+          <input type="search" autocomplete="off" placeholder="${t.searchRoom}"></label>
+        <div class="room-results" aria-live="polite"></div>
       </section>
       <section class="block"><h2>${t.scale}</h2><p class="description">${t.scaleHelp}</p>
         <table><thead><tr><th scope="col">${t.dialStep}</th><th scope="col">${t.water}</th></tr></thead>
@@ -365,6 +365,7 @@ class HeatDialPanel extends HTMLElement {
       <div class="save-row"><button type="submit">${t.save}</button><span role="status"></span></div>
     </form>`;
     const form = page.querySelector("form");
+    this.#editRooms(form, temperatures);
     const table = form.querySelector("#scale-rows");
     const renderScale = (values) => {
       table.innerHTML = values.map((value, index) => `<tr><th scope="row">${index + 1}</th>
@@ -396,6 +397,58 @@ class HeatDialPanel extends HTMLElement {
     if (preview.textContent !== display) preview.textContent = display;
   }
 
+  #editRooms(form, temperatures) {
+    const t = this.#t;
+    const selected = form.querySelector(".selected-rooms");
+    const search = form.querySelector('input[type="search"]');
+    const results = form.querySelector(".room-results");
+    const add = (id, weight) => {
+      const row = document.createElement("div");
+      row.className = "selected-room";
+      row.innerHTML = `<span>${escape(this.#name(id))}</span>
+        <label>${t.weight}<input type="number" min="0" max="2" step="any" required
+          name="room_weight" data-room="${escape(id)}" value="${weight}"></label>
+        <button type="button" aria-label="${escape(`${t.removeRoom}: ${this.#name(id)}`)}">${t.removeRoom}</button>`;
+      row.querySelector("button").addEventListener("click", () => {
+        row.remove();
+        updateResults();
+        search.focus();
+      });
+      selected.append(row);
+    };
+    const updateResults = () => {
+      const query = search.value.toLocaleLowerCase(this.#locale).trim();
+      const existing = new Set(Array.from(selected.querySelectorAll("[data-room]"), (input) => input.dataset.room));
+      const available = temperatures.filter((id) => !existing.has(id)
+        && id !== form.elements.outdoor.value && id !== form.elements.dial.value);
+      const matches = query ? available.filter((id) =>
+        `${this.#name(id)} ${id}`.toLocaleLowerCase(this.#locale).includes(query)
+      ).sort((a, b) => this.#name(a).localeCompare(this.#name(b), this.#locale)).slice(0, 8) : [];
+      results.replaceChildren();
+      if (!query) return;
+      if (!matches.length) results.textContent = t.noRoomMatches;
+      for (const id of matches) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = this.#name(id);
+        button.addEventListener("click", () => {
+          add(id, 1);
+          search.value = "";
+          updateResults();
+          search.focus();
+        });
+        results.append(button);
+      }
+    };
+    for (const [id, weight] of Object.entries(this.#config.room_weights)) add(id, weight);
+    search.addEventListener("input", updateResults);
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") event.preventDefault();
+    });
+    form.elements.outdoor.addEventListener("change", updateResults);
+    form.elements.dial.addEventListener("change", updateResults);
+  }
+
   async #save(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -409,10 +462,15 @@ class HeatDialPanel extends HTMLElement {
     const formData = new FormData(form);
     const values = Object.fromEntries(FIELDS.map((key) => [key, Number(formData.get(key))]));
     const dialScale = formData.getAll("scale_row").map((value) => numeric(value));
+    const weights = Object.fromEntries(Array.from(form.querySelectorAll("[data-room]"), (input) => [
+      input.dataset.room, Number(input.value),
+    ]));
     const data = {
       ...values, shadow_mode: formData.has("shadow_mode"), dial: formData.get("dial"),
       outdoor: formData.get("outdoor"), dial_scale: dialScale.map((value) => value ?? "-").join(";"),
-      primary_rooms: formData.getAll("primary_rooms"), secondary_rooms: formData.getAll("secondary_rooms"),
+      primary_rooms: Object.keys(weights).filter((key) => weights[key] >= 1),
+      secondary_rooms: Object.keys(weights).filter((key) => weights[key] < 1),
+      room_weights: JSON.stringify(weights),
     };
     if (formData.get("weather")) data.weather = formData.get("weather");
     try {
@@ -423,7 +481,7 @@ class HeatDialPanel extends HTMLElement {
         status.textContent = t[result.errors?.base] ?? t.saveError;
         return;
       }
-      this.#config = { ...config, ...data, settings: values, dial_scale: dialScale };
+      this.#config = { ...config, ...data, settings: values, dial_scale: dialScale, room_weights: weights };
       status.textContent = t.saved;
     } catch {
       status.classList.add("error");

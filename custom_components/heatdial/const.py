@@ -9,6 +9,7 @@ CONF_OUTDOOR = "outdoor"
 CONF_WEATHER = "weather"
 CONF_PRIMARY = "primary_rooms"
 CONF_SECONDARY = "secondary_rooms"
+CONF_ROOM_WEIGHTS = "room_weights"
 CONF_SHADOW = "shadow_mode"
 
 UPDATE_INTERVAL = timedelta(minutes=5)

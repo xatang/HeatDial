@@ -44,6 +44,7 @@ async def async_register_heatdial_panel(hass: HomeAssistant, entry: "HeatDialEnt
         "weather": coordinator.config.get(CONF_WEATHER),
         "primary_rooms": list(coordinator.primary),
         "secondary_rooms": list(coordinator.secondary),
+        "room_weights": coordinator.weights,
         "entities": {
             key: registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
             for key in ("recommendation", "reason", "recommended_dial")

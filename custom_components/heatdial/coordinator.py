@@ -14,13 +14,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER,
+    CONF_DIAL, CONF_DIAL_SCALE, CONF_OUTDOOR, CONF_PRIMARY, CONF_ROOM_WEIGHTS, CONF_SECONDARY, CONF_SHADOW, CONF_WEATHER,
     DOMAIN, FORECAST_INTERVAL, FORECAST_MAX_AGE, SENSOR_MAX_AGE, UPDATE_INTERVAL,
 )
 from .engine import (
     HOUR, MINUTE, HISTORY_SECONDS, MAX_GAP, Advice, Point, Reading, Settings, Weather,
     confirm_advice, continuous, decide, dial_position, forecast_horizon, number,
-    recorded_readings, resolve_scale, weather_signal,
+    recorded_readings, resolve_scale, room_groups, room_weights, weather_signal,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,8 +65,11 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             key: self.config[key]
             for key in Settings.__dataclass_fields__ if key in self.config and key != "max_dial"
         }, max_dial=len(self.scale))
-        self.primary = tuple(self.config[CONF_PRIMARY])
-        self.secondary = tuple(self.config.get(CONF_SECONDARY, ()))
+        self.weights = room_weights(
+            self.config.get(CONF_ROOM_WEIGHTS, ""),
+            self.config[CONF_PRIMARY], self.config.get(CONF_SECONDARY, ()),
+        )
+        self.primary, self.secondary = room_groups(self.weights)
         self.shadow = self.config.get(CONF_SHADOW, True)
         self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._history: list[Reading] = []
@@ -218,7 +221,7 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
 
     async def _async_read(self) -> Snapshot:
         utc = dt_util.utcnow()
-        rooms = {key: self._temperature(key, utc) for key in (*self.primary, *self.secondary)}
+        rooms = {key: self._temperature(key, utc) for key in self.weights}
         has_primary = all(rooms[key] is not None for key in self.primary)
         if has_primary and not self._history_seeded:
             self._history_seeded = True
@@ -239,7 +242,9 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             self._last_dial_change = observed_change
 
         outdoor = self._temperature(self.config[CONF_OUTDOOR], utc)
-        current = Reading(timestamp, dial, outdoor, {key: val for key, val in rooms.items() if val is not None})
+        current = Reading(timestamp, dial, outdoor, {
+            key: val for key, val in rooms.items() if val is not None and self.weights[key] > 0
+        })
         self._history = [
             item for item in self._history if timestamp - HISTORY_SECONDS <= item.time < timestamp
         ]
@@ -256,7 +261,10 @@ class HeatDialCoordinator(DataUpdateCoordinator[Snapshot]):
             self._pending = None
         forecast, provider_now = await self._async_forecast(utc)
         weather = weather_signal(history, forecast, provider_now, forecast_horizon(now, self.settings))
-        advice = decide(self.settings, now, history, self.primary, self.secondary, weather, self._last_dial_change)
+        advice = decide(
+            self.settings, now, history, self.primary, self.secondary, weather,
+            self._last_dial_change, self.weights,
+        )
         advice, self._pending = confirm_advice(advice, self._pending, timestamp)
         notice = self._notice(advice, now)
         self._store.async_delay_save(self._stored_data, 10)
