@@ -29,7 +29,7 @@ HeatDial reads up to five hours of existing Recorder history at setup, including
 Open **HeatDial** from the Home Assistant sidebar or from **Settings → Devices & services → Integrations → HeatDial**. The page ships with the integration and uses your Home Assistant profile language (English or Russian).
 
 - **Overview** shows the recorded dial position, the advice, the room temperatures and the weather outlook used in the decision.
-- **History** charts room temperatures and dial positions for the last 24 hours or three days.
+- **History** shows room and outdoor temperatures, dial positions and advice changes for 24 hours, three days or seven days.
 - **Settings** changes the comfort range, schedule, data sources, dial scale and shadow mode.
 
 You can also add these entities to an existing dashboard:

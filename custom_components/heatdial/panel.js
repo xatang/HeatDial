@@ -4,9 +4,12 @@ import { text } from "./panel-text.js";
 const INTEGRATION = "/config/integrations/integration/heatdial";
 const OPTIONS = "config/config_entries/options/flow";
 const HOUR_MS = 3600000;
+const MAX_ROOM_AGE = 90 * 60000;
+const HISTORY_HOURS = [24, 72, 168];
+const COMFORT_FIELDS = ["day_min", "day_max", "night_min"];
+const SCHEDULE_FIELDS = ["day_start", "day_end", "lower_from", "lower_until", "evening_from", "evening_until"];
 const FIELDS = [
-  "day_min", "day_max", "night_min", "day_start", "day_end",
-  "lower_from", "lower_until", "evening_from", "evening_until",
+  ...COMFORT_FIELDS, ...SCHEDULE_FIELDS,
 ];
 const CHART_COLORS = ["--primary-color", "--warning-color", "--success-color", "--info-color",
   "--accent-color"];
@@ -103,11 +106,12 @@ class HeatDialPanel extends HTMLElement {
   #update() {
     if (!this.isConnected || !this.#config || !this.#hass) return;
     const current = this.#state;
-    const signature = [this.#locale, current, this.#config, this.#isDay()];
+    const roomStates = Object.keys(this.#config.room_weights).map((key) => this.#hass.states[key]);
+    const signature = [this.#locale, current, this.#config, this.#isDay(), ...roomStates];
     const old = this.#signature;
     const rebuild = !old || signature[0] !== old[0] || signature[2] !== old[2];
     if (rebuild) this.#renderFrame();
-    if (rebuild || (this.#tab === "overview" && (old[1] !== current || old[3] !== signature[3]))) {
+    if (rebuild || (this.#tab === "overview" && signature.some((value, index) => value !== old[index]))) {
       this.#renderTab();
     }
     if (this.#tab === "settings") this.#updateDialPreview();
@@ -194,10 +198,18 @@ class HeatDialPanel extends HTMLElement {
         <div class="room-heading"><h2>${t.rooms}</h2>
           <p class="description">${day ? t.day : t.nightComfort} ${this.#temp(minimum)} – ${this.#temp(day_max)}</p></div>
         <div class="room-list">${rooms.map(([id, weight]) =>
-          this.#roomCard(id, weight, numeric(attrs.room_temperatures_c?.[id]), minimum, day_max)
+          this.#roomCard(id, weight, this.#liveRoomTemperature(id), minimum, day_max)
         ).join("")}</div>
       </section>
     </div>`;
+  }
+
+  #liveRoomTemperature(id) {
+    const state = this.#hass.states[id];
+    if (!state) return null;
+    const stamp = Date.parse(state.last_reported ?? state.last_updated);
+    if (Number.isFinite(stamp) && Date.now() - stamp > MAX_ROOM_AGE) return null;
+    return toCelsius(numeric(state.state), state.attributes.unit_of_measurement);
   }
 
   #roomCard(id, weight, value, minimum, maximum) {
@@ -214,7 +226,7 @@ class HeatDialPanel extends HTMLElement {
       <div class="room-card-title"><h3>${escape(this.#name(id))}</h3><small>${weightLabel}</small></div>
       <div class="temperature">${this.#temp(value)}</div>
       <div class="comfort-track" style="--edge:${edge}%;--position:${position}%" aria-hidden="true">
-        <span></span><span></span><span></span>${value === null ? "" : "<i></i>"}
+        ${value === null ? "" : "<i></i>"}
       </div>
       <p class="room-status">${quality}</p>
     </article>`;
@@ -222,16 +234,21 @@ class HeatDialPanel extends HTMLElement {
 
   #historyTab(page) {
     const t = this.#t;
-    page.innerHTML = `<div class="tools">
-      <select aria-label="${t.period}"><option value="24">${t.last24}</option>
-        <option value="72">${t.last72}</option></select>
-      <button type="button">${t.refresh}</button>
+    let hours = this.#history?.hours ?? 24;
+    page.innerHTML = `<div class="tools history-tools">
+      <div class="history-period" role="group" aria-label="${t.period}">
+        ${HISTORY_HOURS.map((value) => `<button type="button" data-hours="${value}" aria-pressed="${hours === value}">${t[`last${value}`]}</button>`).join("")}
+      </div>
+      <button type="button" data-refresh>${t.refresh}</button>
     </div><div class="plots" aria-live="polite"></div>`;
-    const select = page.querySelector("select");
-    select.value = String(this.#history?.hours ?? 24);
-    const load = () => this.#loadHistory(Number(select.value), page.querySelector(".plots"));
-    select.addEventListener("change", load);
-    page.querySelector("button").addEventListener("click", load);
+    const load = () => this.#loadHistory(hours, page.querySelector(".plots"));
+    const choices = page.querySelectorAll("[data-hours]");
+    for (const button of choices) button.addEventListener("click", () => {
+      hours = Number(button.dataset.hours);
+      for (const option of choices) option.setAttribute("aria-pressed", String(option === button));
+      load();
+    });
+    page.querySelector("[data-refresh]").addEventListener("click", load);
     load();
   }
 
@@ -239,9 +256,9 @@ class HeatDialPanel extends HTMLElement {
     const request = ++this.#request;
     this.#plots = [];
     plots.textContent = this.#t.loading;
-    const { room_weights, dial, entities } = this.#config;
+    const { room_weights, dial, outdoor, entities } = this.#config;
     const rooms = Object.keys(room_weights);
-    const ids = [...rooms, dial, entities.recommended_dial].filter(Boolean);
+    const ids = [...new Set([...rooms, dial, outdoor, entities.recommended_dial, entities.recommendation].filter(Boolean))];
     const end = Date.now();
     const start = end - hours * HOUR_MS;
     try {
@@ -261,19 +278,21 @@ class HeatDialPanel extends HTMLElement {
         }).filter(([ts]) => Number.isFinite(ts)),
       });
       const charts = [
-        { label: t.roomChart, lines: rooms.map((id) => series(id, this.#name(id), true)), step: false },
+        { label: t.roomChart, lines: rooms.map((id) => series(id, this.#name(id), true)), step: false, unit: "°C" },
+        { label: t.outdoor, lines: [series(outdoor, t.outdoor, true)], step: false, unit: "°C" },
         { label: t.dialChart, lines: [
           series(dial, t.current, false), series(entities.recommended_dial, t.recommended, false),
-        ], step: true },
+        ], step: true, unit: "" },
       ];
-      plots.innerHTML = charts.map(({ label, lines }, index) => {
+      plots.innerHTML = charts.map(({ label, lines, unit }, index) => {
         const hasValues = lines.some(({ data }) => data.some(([, value]) => value !== null));
-        return `<section class="block"><h2>${label}</h2>
+        return `<section class="block history-card"><h2>${label}</h2>
+          ${hasValues && unit ? `<small class="plot-unit">${unit}</small>` : ""}
           ${hasValues ? `<canvas data-plot="${index}" role="img" aria-label="${label}"></canvas><ul class="legend">${lines.map((line, i) =>
-            `<li><i style="--series:var(${CHART_COLORS[i % CHART_COLORS.length]});border-top-style:${i % 2 ? "dashed" : "solid"}"></i>${escape(line.label)}</li>`
+            `<li><i style="--series:var(${CHART_COLORS[i % CHART_COLORS.length]});border-top-style:${i % 2 ? "dashed" : "solid"}"></i>${escape(line.label)}${line.data.at(-1)?.[1] != null ? ` <strong>${unit === "°C" ? this.#temp(line.data.at(-1)[1]) : line.data.at(-1)[1]}</strong>` : ""}</li>`
           ).join("")}</ul>` : `<p class="description">${t.noHistory}</p>`}
         </section>`;
-      }).join("");
+      }).join("") + this.#decisionHistory(data[entities.recommendation] ?? [], start, end);
       this.#plots = Array.from(plots.querySelectorAll("canvas"), (canvas) => ({
         canvas, start, end, ...charts[Number(canvas.dataset.plot)],
       }));
@@ -281,6 +300,29 @@ class HeatDialPanel extends HTMLElement {
     } catch {
       if (request === this.#request && plots.isConnected) plots.textContent = this.#t.historyError;
     }
+  }
+
+  #decisionHistory(rows, start, end) {
+    const t = this.#t;
+    const changes = rows.map((row) => ({ at: (row.lc ?? row.lu) * 1000, action: row.s }))
+      .filter(({ at }) => Number.isFinite(at) && at < end);
+    const last = changes.slice(-5).reverse();
+    const spans = changes.map(({ at, action }, index) => {
+      const width = 100 * (Math.min(end, changes[index + 1]?.at ?? end) - Math.max(start, at)) / (end - start);
+      return width > 0 ? `<i data-action="${["hold", "raise", "lower", "wait"].includes(action) ? action : "missing"}" style="width:${width}%"></i>` : "";
+    }).join("");
+    return `<section class="block history-card"><h2>${t.decisions}</h2>
+      ${last.length ? `<div class="decision-track" aria-hidden="true">${spans}</div>
+        <ol class="decision-list">${last.map(({ at, action }) => `<li><time datetime="${new Date(at).toISOString()}">${this.#historyDate(at, end - start)}</time>
+          <span>${t.actions[action] ?? t.noRoomReading}</span></li>`).join("")}</ol>`
+        : `<p class="description">${t.noHistory}</p>`}</section>`;
+  }
+
+  #historyDate(ts, span) {
+    if (span <= 24 * HOUR_MS) return this.#time(ts);
+    return new Intl.DateTimeFormat(this.#locale, {
+      day: "numeric", month: "short", timeZone: this.#hass.config?.time_zone,
+    }).format(ts);
   }
 
   #drawPlots() {
@@ -296,9 +338,14 @@ class HeatDialPanel extends HTMLElement {
       ctx.font = "12px system-ui";
       const css = getComputedStyle(canvas);
       const x = (ts) => 39 + (width - 50) * (Math.min(end, Math.max(start, ts)) - start) / (end - start);
-      const values = lines.flatMap(({ data }) => data.map(([, v]) => v).filter((v) => v !== null));
-      const bottom = step ? 0 : Math.floor(Math.min(...values));
-      const top = step ? Math.max(3, ...values) : Math.max(bottom + 1, Math.ceil(Math.max(...values)));
+      let low = Infinity, high = -Infinity;
+      for (const { data } of lines) for (const [, value] of data) {
+        if (value === null) continue;
+        low = Math.min(low, value);
+        high = Math.max(high, value);
+      }
+      const bottom = step ? 0 : Math.floor(low);
+      const top = step ? Math.max(3, high) : Math.max(bottom + 1, Math.ceil(high));
       const y = (v) => 12 + (height - 42) * (top - v) / (top - bottom);
       const ticks = Math.min(step ? top : 4, 6);
       ctx.strokeStyle = css.getPropertyValue("--divider-color").trim() || "#606060";
@@ -315,7 +362,7 @@ class HeatDialPanel extends HTMLElement {
       ctx.textAlign = "center";
       for (let i = 1; i <= 3; i += 1) {
         const ts = start + (end - start) * i / 4;
-        ctx.fillText(this.#time(ts), x(ts), height - 6);
+        ctx.fillText(this.#historyDate(ts, end - start), x(ts), height - 6);
       }
       lines.forEach(({ data }, i) => {
         ctx.strokeStyle = css.getPropertyValue(CHART_COLORS[i % CHART_COLORS.length]).trim() || "#888";
@@ -359,16 +406,21 @@ class HeatDialPanel extends HTMLElement {
         <option value="" ${optional ? "" : "disabled"}>—</option>
         ${ordered(ids, [saved]).map((id) => `<option value="${escape(id)}" ${saved === id ? "selected" : ""}>${escape(this.#name(id))}</option>`).join("")}
       </select></label>`;
-    page.innerHTML = `<form class="layout">
-      <section class="block"><h2>${t.settingsTitle}</h2>
-        <div class="form-grid">${FIELDS.map((key) => {
-          const temperature = key.endsWith("_min") || key === "day_max";
-          return `<label>${t[key]}<input type="number" name="${key}" value="${escape(config.settings[key])}"
-            min="${temperature ? 10 : 0}" max="${temperature ? 35 : 24}"
-            step="${temperature ? 0.5 : 1}" required></label>`;
-        }).join("")}</div>
+    const rows = (keys, temperature) => keys.map((key) => `<div class="setting-row">
+      <label for="heatdial-${key}">${t[key]}</label>
+      ${this.#stepper(`<input type="number" id="heatdial-${key}" name="${key}" value="${escape(config.settings[key])}"
+        min="${temperature ? 10 : 0}" max="${temperature ? 35 : 24}"
+        step="${temperature ? 0.5 : 1}" required>`, t[key], temperature ? 0.5 : 1)}
+    </div>`).join("");
+    page.innerHTML = `<form class="settings-grid">
+      <div class="settings-column">
+      <section class="block"><h2>${t.comfortTitle}</h2>${rows(COMFORT_FIELDS, true)}</section>
+      <section class="block"><h2>${t.scheduleTitle}</h2>${rows(SCHEDULE_FIELDS, false)}</section>
+      <section class="block"><h2>${t.modeTitle}</h2>
         <label class="checkbox"><input type="checkbox" name="shadow_mode" ${config.shadow_mode ? "checked" : ""}>${t.shadowMode}</label>
       </section>
+      </div>
+      <div class="settings-column">
       <section class="block"><h2>${t.inputs}</h2>
         <div class="source-fields">
           ${select("dial", t.dialSource, dialIds, config.dial)}
@@ -377,13 +429,15 @@ class HeatDialPanel extends HTMLElement {
           ${select("weather", t.weatherSource, weatherIds, config.weather, true)}
         </div>
       </section>
-      <section class="block rooms"><h2>${t.rooms}</h2>
+      <section class="block"><h2>${t.roomSettings}</h2>
         <p class="description">${t.weightHelp}</p>
         <div class="selected-rooms"></div>
         <label class="room-search">${t.addRoom}
           <input type="search" autocomplete="off" placeholder="${t.searchRoom}"></label>
         <div class="room-results" aria-live="polite"></div>
       </section>
+      </div>
+      <div class="settings-column">
       <section class="block"><h2>${t.scale}</h2><p class="description">${t.scaleHelp}</p>
         <table><thead><tr><th scope="col">${t.dialStep}</th><th scope="col">${t.water}</th></tr></thead>
           <tbody id="scale-rows"></tbody></table>
@@ -392,6 +446,7 @@ class HeatDialPanel extends HTMLElement {
           <button type="button" data-scale="remove">${t.removeStep}</button>
         </div>
       </section>
+      </div>
       <div class="save-row"><button type="submit">${t.save}</button><span role="status"></span></div>
     </form>`;
     const form = page.querySelector("form");
@@ -413,9 +468,26 @@ class HeatDialPanel extends HTMLElement {
         renderScale(values);
       });
     }
+    form.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-step]");
+      if (!button) return;
+      const input = button.parentElement.querySelector("input");
+      const next = (numeric(input.value) ?? 0) + Number(button.dataset.step);
+      input.value = Math.max(Number(input.min), Math.min(Number(input.max), Number(next.toFixed(8))));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     form.addEventListener("submit", (event) => this.#save(event));
     form.querySelector('[name="dial"]').addEventListener("change", () => this.#updateDialPreview());
     this.#updateDialPreview();
+  }
+
+  #stepper(input, label, step) {
+    const t = this.#t;
+    return `<span class="stepper">
+      <button type="button" data-step="-${step}" aria-label="${escape(`${t.decrease} · ${label}`)}">−</button>
+      ${input}
+      <button type="button" data-step="${step}" aria-label="${escape(`${t.increase} · ${label}`)}">+</button>
+    </span>`;
   }
 
   #updateDialPreview() {
@@ -435,11 +507,13 @@ class HeatDialPanel extends HTMLElement {
     const add = (id, weight) => {
       const row = document.createElement("div");
       row.className = "selected-room";
-      row.innerHTML = `<span>${escape(this.#name(id))}</span>
-        <label>${t.weight}<input type="number" min="0" max="2" step="any" required
-          name="room_weight" data-room="${escape(id)}" value="${weight}"></label>
-        <button type="button" aria-label="${escape(`${t.removeRoom}: ${this.#name(id)}`)}">${t.removeRoom}</button>`;
-      row.querySelector("button").addEventListener("click", () => {
+      const name = this.#name(id);
+      const label = `${t.weight} · ${name}`;
+      row.innerHTML = `<span>${escape(name)}</span>
+        ${this.#stepper(`<input aria-label="${escape(label)}" type="number" min="0" max="2" step="any" required
+          name="room_weight" data-room="${escape(id)}" value="${weight}">`, label, 0.1)}
+        <button type="button" data-remove-room aria-label="${escape(`${t.removeRoom} · ${name}`)}">${t.removeRoom}</button>`;
+      row.querySelector("[data-remove-room]").addEventListener("click", () => {
         row.remove();
         updateResults();
         search.focus();
