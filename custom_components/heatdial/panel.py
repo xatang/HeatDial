@@ -53,6 +53,8 @@ async def async_register_heatdial_panel(hass: HomeAssistant, entry: "HeatDialEnt
         hass,
         frontend_url_path=PANEL_PATH,
         webcomponent_name="heatdial-panel",
+        sidebar_title="HeatDial",
+        sidebar_icon="mdi:knob",
         module_url=f"{_ASSET_PATH}/panel.js?v={integration.version}",
         config=config,
         require_admin=True,
