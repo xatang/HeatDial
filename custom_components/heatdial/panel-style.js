@@ -51,6 +51,8 @@ export const styles = `
   .source-fields { display:grid; gap:12px; margin-top:14px; }
   .source-fields > label { display:grid; gap:5px; min-width:0; }
   .source-fields select { width:100%; min-width:0; text-overflow:ellipsis; }
+  .source-preview { display:flex; justify-content:space-between; gap:10px; padding:0 2px; color:var(--muted); font-size:14px; }
+  .source-preview output { color:var(--primary-text-color); font-variant-numeric:tabular-nums; font-weight:600; }
   fieldset { min-width:0; border:1px solid var(--line); border-radius:8px; margin:0; padding:8px; }
   .room-options { max-height:135px; overflow:auto; }
   .check-row { display:flex; align-items:start; gap:8px; padding:4px; overflow-wrap:anywhere; }

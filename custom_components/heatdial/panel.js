@@ -100,6 +100,7 @@ class HeatDialPanel extends HTMLElement {
     const rebuild = !old || signature[0] !== old[0] || signature[2] !== old[2];
     if (rebuild) this.#renderFrame();
     if (rebuild || (this.#tab === "overview" && old[1] !== current)) this.#renderTab();
+    if (this.#tab === "settings") this.#updateDialPreview();
     this.#signature = signature;
   }
 
@@ -345,7 +346,8 @@ class HeatDialPanel extends HTMLElement {
       </section>
       <section class="block"><h2>${t.inputs}</h2>
         <div class="source-fields">
-          ${select("dial", t.current, dialIds, config.dial)}
+          ${select("dial", t.dialSource, dialIds, config.dial)}
+          <div class="source-preview"><span>${t.current}</span><output data-dial-preview>—</output></div>
           ${select("outdoor", t.outdoor, temperatures, config.outdoor)}
           ${select("weather", t.weatherSource, weatherIds, config.weather, true)}
           ${rooms("primary_rooms", t.primaryRooms, config.primary_rooms)}
@@ -381,6 +383,17 @@ class HeatDialPanel extends HTMLElement {
       });
     }
     form.addEventListener("submit", (event) => this.#save(event));
+    form.querySelector('[name="dial"]').addEventListener("change", () => this.#updateDialPreview());
+    this.#updateDialPreview();
+  }
+
+  #updateDialPreview() {
+    const source = this.shadowRoot.querySelector('[name="dial"]');
+    const preview = this.shadowRoot.querySelector("[data-dial-preview]");
+    if (!source || !preview) return;
+    const value = numeric(this.#hass.states[source.value]?.state);
+    const display = String(value ?? "—");
+    if (preview.textContent !== display) preview.textContent = display;
   }
 
   async #save(event) {

@@ -3,6 +3,7 @@ export const text = {
   en: {
     back: "Integrations", overview: "Overview", history: "History", settings: "Settings",
     decision: "Boiler advice", current: "Recorded dial", recommended: "Recommended dial",
+    dialSource: "Dial position source",
     hold: "Keep dial at {dial}", raise: "Raise to {dial}", lower: "Lower to {dial}", wait: "Waiting for readings",
     shadow: "Shadow mode", notices: "Adjustment events enabled",
     rooms: "Room temperatures", primary: "Primary", secondary: "Secondary",
@@ -51,7 +52,8 @@ export const text = {
   },
   ru: {
     back: "Интеграции", overview: "Обзор", history: "История", settings: "Настройки",
-    decision: "Совет по котлу", current: "Деление сейчас", recommended: "Рекомендуемое деление",
+    decision: "Совет по котлу", current: "Записанное деление", recommended: "Рекомендуемое деление",
+    dialSource: "Источник положения ручки",
     hold: "Оставить деление {dial}", raise: "Прибавить до {dial}", lower: "Убавить до {dial}", wait: "Ждём данные",
     shadow: "Режим наблюдения", notices: "События для уведомлений включены",
     rooms: "Температура в комнатах", primary: "Приоритетная", secondary: "Дополнительная",
